@@ -14,16 +14,16 @@ import matplotlib.image as mpimg
 import matplotlib.patches as patches
 
 IMG_SIZE = 200
-IMG_PATH = '/images/SKAMid_B1_1000h_v3.fits'
-TRAINING_SET_PATH = '/training_sets/TrainingSet_B1_v2.txt'
+IMG_PATH = './data/SKAMid_B1_1000h_v3.fits'
+TRAINING_SET_PATH = './training_set/TrainingSet_B1_v2.txt'
 
 def prepareImageFirstMethod():
 	img = aplpy.FITSFigure(IMG_PATH, downsample=25)
 	img.show_colorscale(cmap='gist_heat')
-	img.save('/images/imageResult1.png')
+	img.save('./data/imageResult1.png')
 
 def showImage():
-	img = mpimg.imread('/images/imageResult1.png')
+	img = mpimg.imread('/data/imageResult1.png')
 	imgplot = plt.imshow(img)
 	plt.show()
 
