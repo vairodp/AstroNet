@@ -1,40 +1,34 @@
+#Utilities
 import pandas as pd
 import numpy as np
-#import keras 
 
+#Astropy
 from astropy.io import fits
 import astropy.wcs as pywcs
 from astropy.nddata.utils import Cutout2D
 import aplpy
 
+#Plotting
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 import matplotlib.patches as patches
 
 IMG_SIZE = 200
-
-def prepareImageSecondMethod():
-	image_file = fits.open('../data/raw/SKAMid_B1_1000h_v3.fits')
-	image_data = image_file[0]
-	image_data = image_data.data.reshape((32768,32768))
-	image_data = image_data[:15000,:15000]
-	img = aplpy.FITSFigure(image_data)
-	img.show_colorscale(cmap='gist_heat')
-	img.save('imageResult2.png')
+IMG_PATH = '/images/SKAMid_B1_1000h_v3.fits'
+TRAINING_SET_PATH = '/training_sets/TrainingSet_B1_v2.txt'
 
 def prepareImageFirstMethod():
-	img = aplpy.FITSFigure('../data/raw/SKAMid_B1_1000h_v3.fits', downsample=25)
+	img = aplpy.FITSFigure(IMG_PATH, downsample=25)
 	img.show_colorscale(cmap='gist_heat')
-	img.save('../data/imageResult1.png')
-
+	img.save('/images/imageResult1.png')
 
 def showImage():
-	img = mpimg.imread('imageResult1.png')
+	img = mpimg.imread('/images/imageResult1.png')
 	imgplot = plt.imshow(img)
 	plt.show()
 
 def showDataSet():
-	TrainingSet=pd.read_csv("../data/ground-truth/TrainingSet_B1_v2.txt",skiprows=17,delimiter='\s+')
+	TrainingSet=pd.read_csv(TRAINING_SET_PATH, skiprows=17,delimiter='\s+')
 	TrainingSet=TrainingSet[TrainingSet.columns[0:15]]
 	TrainingSet.columns=['ID','RA (core)','DEC (core)','RA (centroid)','DEC (centroid)','FLUX','Core frac','BMAJ','BMIN','PA','SIZE','CLASS','SELECTION','x','y']
 
@@ -42,10 +36,10 @@ def showDataSet():
 	print(TrainingSet.len())
 
 def divideImages():
-	# Divide the fits image in 50x50 images
-	fits_img = fits.open("../data/raw/SKAMid_B1_1000h_v3.fits")
+	# Divide the fits image in 200X200 images
+	fits_img = fits.open(IMG_PATH)
 	fits_img = make_fits_2D(fits_img[0])
-	TrainingSet=pd.read_csv("../data/ground-truth/TrainingSet_B1_v2.txt",skiprows=17,delimiter='\s+')
+	TrainingSet=pd.read_csv(TRAINING_SET_PATH,skiprows=17,delimiter='\s+')
 	TrainingSet=TrainingSet[TrainingSet.columns[0:15]]
 	TrainingSet.columns=['ID','RA (core)','DEC (core)','RA (centroid)','DEC (centroid)','FLUX','Core frac','BMAJ','BMIN','PA','SIZE','CLASS','SELECTION','x','y']
 	TrainingSet['x'] = TrainingSet['x'].astype(int)
@@ -53,8 +47,6 @@ def divideImages():
     #print(fits_img.info())
 	X_PIXEL_RES = abs(fits_img.header['CDELT1'])
 	WORLD_REF = pywcs.WCS(fits_img.header).deepcopy()
-
-	print(fits_img.data.shape)
 
 	fits_img=fits_img.data[0,0]
 	print(fits_img.shape)
@@ -133,9 +125,3 @@ def make_fits_2D(hdu):
 	return hdu
 
 divideImages()
-#array = np.load("img_array.npy")
-#for i in range(0,10):
-	# Save the generated images
-	#np.save("img_array.npy",img_array)
-#	plt.imshow(array[i], cmap='gist_heat')
-#	plt.show()
