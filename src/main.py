@@ -15,7 +15,7 @@ import matplotlib.patches as patches
 
 #Globals
 IMG_SIZE = 128
-IMG_PATH = './data/SKAMid_B1_1000h_v3.fits'
+IMG_PATH = './data/raw/SKAMid_B1_1000h_v3.fits'
 TRAINING_SET_PATH = './training_set/TrainingSet_B1_v2.txt'
 
 #Tweak this
@@ -64,7 +64,7 @@ def deb_plot(x, y):
 
 	return
 
-def adjustSemiAxis(major,minor,category,size,BMAJ_RATIO,BMIN_RATIO,G_SQUARED):
+def adjustSemiAxes(major,minor,category,size,BMAJ_RATIO,BMIN_RATIO,G_SQUARED):
 
 	if category == 1 and size == 1:
 		bmaj, bmin = major/2.0,minor/2.0
@@ -118,58 +118,53 @@ def newDivideImages():
 				img_array = img_fits.data
 				_, ax = plt.subplots()
 				for _, row in small_ts.iterrows():
-					#Found something relevant
-					if row['FLUX'] > FLUX_TRESHOLD:
+					#Print Debugging
+					#flux = row['FLUX']
+					#print(str(row.ID))
+					#print('x: ', str(row['x']), "y: ", str(row['y']), " Flux =", flux)
+					#print("Normal i and j :",i, "  ", j)
+					#print(str(i+IMG_SIZE), "  ", str(j+IMG_SIZE))
+					#print("----------------------------")
+					#Center
+					centroid_x = int(row['x']-i)
+					centroid_y = int(row['y']-j)
+					center = patches.Circle((centroid_x,centroid_y),radius=1, edgecolor='g',facecolor = "none")
 
-						#Print Debugging
-						flux = row['FLUX']
-						print('x: ', str(row['x']), "y: ", str(row['y']), " Flux =", flux)
-						print("Normal i and j :",i, "  ", j)
-						print(str(i+IMG_SIZE), "  ", str(j+IMG_SIZE))
-						print("----------------------------")
-						#Center
-						centroid_x = int(row['x']-i)
-						centroid_y = int(row['y']-j)
-						center = patches.Circle((centroid_x,centroid_y),radius=1, edgecolor='g',facecolor = "none")
+					#Box
+					major = (row['BMAJ'] / 3600 / X_PIXEL_RES) / 2
+					minor = (row['BMIN'] / 3600 / X_PIXEL_RES) / 2
+					phi = np.radians(row['PA'])
 
-						#Box
-						major = (row['BMAJ'] / 3600 / X_PIXEL_RES) / 2
-						minor = (row['BMIN'] / 3600 / X_PIXEL_RES) / 2
-						phi = np.radians(row['PA'])
+					major,minor = adjustSemiAxes(major,minor,row.CLASS,row.SIZE, BMAJ_RATIO, BMIN_RATIO, G_SQARED)
 
-						major,minor = adjustSemiAxis(major,minor,row.CLASS,row.SIZE, BMAJ_RATIO, BMIN_RATIO, G_SQARED)
+					#Crop Box around the corner if oversized 
+					xmin, ymin, xmax, ymax = ellipse_to_box(phi, major, minor, centroid_x, centroid_y)
+					xmin = max(xmin, 0)
+					ymin = max(ymin, 0)
+					xmax = min(xmax,IMG_SIZE-1)
+					ymax = min(ymax,IMG_SIZE-1)
 
-						#Fixed 
-						xmin, ymin, xmax, ymax = ellipse_to_box(phi, major, minor, centroid_x, centroid_y)
-						xmin = max(xmin, 0)
-						ymin = max(ymin, 0)
-						xmax = min(xmax,IMG_SIZE-1)
-						ymax = min(ymax,IMG_SIZE-1)
-
-						if row.CLASS == 1:
-							color = 'yellow'
-							text = '1: SS-AGN'
-						elif row.CLASS == 2:
-							color = 'green'
-							text = '2: FS-AGN'
-						else:
-							color = 'blue'
-							text = '3: SFG'
-						box = patches.Rectangle((xmin, ymin),
-                                                    width=xmax - xmin,
-                                                    height=ymax - ymin,
-                                                    linewidth=1,
-                                                    edgecolor=color,
-                                                    facecolor='none')
-						#Update plot
-						ax.add_patch(center)
-						ax.add_patch(box)
-						ax.imshow(img_array,cmap='gist_heat', origin='lower')
-						ax.text(xmin,ymin,text,c=color)
-						ax.text(xmax, ymax, 'XMAX', c=color)
-						
-						#Debugging
-						#deb_plot(row['x'],row['y'])
+					if row.CLASS == 1:
+						color = 'yellow'
+						text = '1: SS-AGN'
+					elif row.CLASS == 2:
+						color = 'green'
+						text = '2: FS-AGN'
+					else:
+						color = 'blue'
+						text = '3: SFG'
+					box = patches.Rectangle((xmin, ymin),
+												width=xmax - xmin,
+												height=ymax - ymin,
+												linewidth=1,
+												edgecolor=color,
+												facecolor='none')
+					#Update plot
+					ax.add_patch(center)
+					ax.add_patch(box)
+					ax.imshow(img_array,cmap='gist_heat', origin='lower')
+					ax.text(xmin,ymin,text,c=color)
+					
 				plt.show()
 	return
 			
