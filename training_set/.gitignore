@@ -1,7 +1,3 @@
 # Use this directory only for storing the training sets you want to work with
-
-# Ignore everything in this directory
-
 *
-# Except this file
 !.gitignore

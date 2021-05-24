@@ -7,6 +7,8 @@ from astropy.io import fits
 import astropy.wcs as pywcs
 from astropy.nddata.utils import Cutout2D
 from astropy.io.fits.verify import VerifyWarning
+
+#Suppressing Warnings
 import warnings 
 warnings.simplefilter('ignore', category=VerifyWarning)
 
@@ -15,15 +17,16 @@ import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 import matplotlib.patches as patches
 
+#Loading Bar
 from tqdm import tqdm
 
-#Globals
+#Globals Values
 IMG_SIZE = 128
 RANGE_MIN= 16384
 RANGE_MAX = 20096
 KAPPA = 0.5
 
-#Paths
+#Global Paths
 IMG_PATH = './data/raw/SKAMid_B1_1000h_v3.fits'
 TRAINING_SET_PATH = './training_set/TrainingSet_B1_v2.txt'
 CUTOUTS_PATH = './data/training/B1_1000h/'
@@ -48,7 +51,6 @@ def deb_plot(x, y):
 	fits_img = fits.open(IMG_PATH)
 	fits_img = make_fits_2D(fits_img[0])
 
-	X_PIXEL_RES = abs(fits_img.header['CDELT1'])
 	WORLD_REF = pywcs.WCS(fits_img.header).deepcopy()
 
 	fits_img = fits_img.data[0, 0]
@@ -106,8 +108,6 @@ def plot_images_and_bbox(ax, img_array, category, centroid_x, centroid_y, xmin, 
 	ax.add_patch(box)
 	ax.imshow(img_array,cmap='gist_heat', origin='lower')
 	ax.text(xmin,ymin,text,c=color)
-
-
 
 #For now filters with the threshold but should works with everything I hope
 def newDivideImages(plot=False):
@@ -170,17 +170,6 @@ def newDivideImages(plot=False):
 				_, ax = plt.subplots()
 			for _, row in small_ts.iterrows():
 
-				#global_count += 1
-				
-				#Print Debugging
-				#flux = row['FLUX']
-				#print(str(row.ID))
-				#print('x: ', str(row['x']), "y: ", str(row['y']), " Flux =", flux)
-				#print("Normal i and j :",i, "  ", j)
-				#print(str(i+IMG_SIZE), "  ", str(j+IMG_SIZE))
-				#print("----------------------------")
-				#Center
-			
 				filtered_count += 1
 
 				centroid_x = int(row['x']-i)
@@ -256,6 +245,5 @@ def train_test_split(filepath, test_size=0.20):
 	print(len(test_paths))
 	print(len(file_paths))
 
-
-#newDivideImages()
-train_test_split(filepath=CUTOUTS_PATH + 'galaxies_560Hz.csv')
+newDivideImages()
+#train_test_split(filepath=CUTOUTS_PATH + 'galaxies_560Hz.csv')
