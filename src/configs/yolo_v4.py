@@ -53,4 +53,25 @@ panet = [
     ['A', 3]
 ]
 
-head = []
+head = [
+    'L',
+    ["S", 256],# input_3 -> output_1
+    (256, 3, 2, 'valid', 'leaky'),# input_3
+    'M',
+    ["C"], # concatanate with input_2
+    (256, 1, 1, 'same', 'leaky')
+    (512, 3, 1, 'same', 'leaky'),
+    (256, 1, 1, 'same', 'leaky'),
+    (512, 3, 1, 'same', 'leaky'),
+    (256, 1, 1, 'same', 'leaky'),
+    ["S", 256],# output_2
+    (512, 3, 2, 'valid', 'leaky'),
+    'S',
+    ["C"], # concatanate with input_1
+    (512, 1, 1, 'same', 'leaky'),
+    (1024, 3, 1, 'same', 'leaky'),
+    (512, 1, 1, 'same', 'leaky'),# output_2
+    (1024, 3, 1, 'same', 'leaky'),
+    (512, 1, 1, 'same', 'leaky'),
+    ["S", 512],# output_3
+]
