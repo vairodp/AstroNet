@@ -1,13 +1,12 @@
-from typing_extensions import Concatenate
 import tensorflow as tf
 from tensorflow.keras import backend
-from tensorflow.keras.layers import BatchNormalization, Conv2D, Input, ZeroPadding2D, LeakyReLU, UpSampling2D, Layer, Add, MaxPool2D
+from tensorflow.keras.layers import BatchNormalization, Conv2D, Input, ZeroPadding2D, LeakyReLU, UpSampling2D, Layer, Add, MaxPool2D, Concatenate
 
-from configs.yolo_v4 import cspdarknet53, panet, head
+from configs.yolo_v4 import cspdarknet53, panet, head, NUM_CLASSES
 
 #TODO understand why alpha = 0.1
 #TODO understand if the activation function can be apllied before bn or not
-#TODO implement DropBlock layer
+#TODO implement DropBlock layer, maybe?
 #TODO understand why "multiply" in spatial attention
 class CNNBlock(Layer):
     def __init__(self, num_filters, kernel_size, bn_act=True, padding='same', activation='leaky', **kwargs):
@@ -143,25 +142,24 @@ class SpatialAttention(Layer):
         return tf.multiply(x, y)
 
 
-'''
-class ScalePrediction():
-    def __init__(self, in_channels, num_classes):
-        super().__init__()
+class ScalePrediction(Layer):
+    def __init__(self, num_filters, **kwargs):
+        super().__init__(**kwargs)
         self.pred = tf.keras.Sequential(
-            CNNBlock(in_channels, 2 * in_channels, kernel_size=3, padding=1),
-            CNNBlock(
-                2 * in_channels, (num_classes + 5) * 3, bn_act=False, kernel_size=1
-            ),
+            CNNBlock(num_filters = num_filters, kernel_size=3),
+            CNNBlock(num_filters=(NUM_CLASSES + 5) * 3, 
+                    bn_act=False, 
+                    kernel_size=1,
+                    activation='linear'
+                ),
         )
-        self.num_classes = num_classes
 
     def call(self, x):
-        return (
-            self.pred(x)
-            .reshape(x.shape[0], 3, self.num_classes + 5, x.shape[2], x.shape[3])
-            .permute(0, 1, 3, 4, 2)
-        )
-'''
+        x = self.pred(x)
+        x = tf.reshape(x, 
+            (-1, tf.shape(x)[1], tf.shape(x)[2], 3, NUM_CLASSES + 5))
+        return x
+        
 
 class Neck(Layer):
     def __init__(self, config, **kwargs):
@@ -234,6 +232,59 @@ class Neck(Layer):
 
         return out_small, out_medium, out_large
 
+
+class Head(Layer):
+    def __init__(self, config, **kwargs):
+        super().__init__(**kwargs)
+        self.concat = Concatenate()
+        self.layers = {
+            'S': [],
+            'M': [],
+            'L': []
+        }
+        self.outputs = []
+        self._get_head(config)
+    
+    def _get_head(self, config):
+        size = 'L'
+        for module in config:
+            if isinstance(module, str):
+                size = module
+            elif isinstance(module, tuple):
+                num_filters, kernel_size, strides, padding, activation = module
+                self.layers[size].append(
+                    CNNBlock(num_filters=num_filters, kernel_size=kernel_size,
+                    padding=padding, activation=activation, strides=strides)
+                )
+            elif isinstance(module, list):
+                if module[0] == 'S':
+                    self.layers[size].append(ScalePrediction(num_filters=module[1]))
+    
+    def call(self, x):
+        output_small, output_medium, output_large = x
+
+        shortcut_large = output_large
+
+        output_large = self.layers['L'][0](output_large)
+
+        large_downsampled = self.layers['L'][1](shortcut_large)
+        output_medium = self.concat([large_downsampled, output_medium])
+
+        for layer in self.layers['M'][:-2]:
+            output_medium = layer(output_medium)
+        
+        shortcut_medium = output_medium
+        output_medium = self.layers['M'][-2](output_medium)
+
+        medium_downsampled = self.layers['M'][-1](shortcut_medium)
+        output_small = self.cocnat([medium_downsampled, output_small])
+
+        for layer in self.layers['S']:
+            output_small = layer(output_small)
+        
+        return output_small, output_medium, output_large
+
+
 class YoloV4(tf.keras.Model):
     def __init__(self, num_classes, shape=(128, 128, 3), backbone=cspdarknet53, neck=panet, head=head):
         super().__init__()
@@ -241,6 +292,7 @@ class YoloV4(tf.keras.Model):
         self.img_shape = shape
         self.backbone = self._get_backbone(backbone)
         self.neck = Neck(neck)
+        self.head = Head(head)
     
     def _get_backbone(self, config):
         in_filters = self.img_shape[2]
@@ -265,5 +317,6 @@ class YoloV4(tf.keras.Model):
                 outputs_backbone.append(layer(x))
             x = layer(x)
         x = Neck(x)
+        x = Head(x)
         return x
     
