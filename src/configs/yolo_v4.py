@@ -59,7 +59,7 @@ head = [
     (256, 3, 2, 'valid', 'leaky'),# input_3
     'M',
     ["C"], # concatanate with input_2
-    (256, 1, 1, 'same', 'leaky')
+    (256, 1, 1, 'same', 'leaky'),
     (512, 3, 1, 'same', 'leaky'),
     (256, 1, 1, 'same', 'leaky'),
     (512, 3, 1, 'same', 'leaky'),
@@ -75,3 +75,7 @@ head = [
     (512, 1, 1, 'same', 'leaky'),
     ["S", 512],# output_3
 ]
+
+loss_params = {
+    'sensitivity_factor': 1.1
+}
