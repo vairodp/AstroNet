@@ -1,6 +1,6 @@
 import tensorflow as tf
 from tensorflow.keras import backend
-from tensorflow.keras.layers import BatchNormalization, Conv2D, Input, ZeroPadding2D, LeakyReLU, UpSampling2D, Layer, Add, MaxPool2D, Concatenate
+from tensorflow.keras.layers import BatchNormalization, Conv2D, Input, ZeroPadding2D, LeakyReLU, UpSampling2D, Layer, Add, MaxPool2D, Concatenate, Activation
 
 from configs.yolo_v4 import cspdarknet53, panet, head, NUM_CLASSES
 
@@ -8,49 +8,42 @@ from configs.yolo_v4 import cspdarknet53, panet, head, NUM_CLASSES
 #TODO understand if the activation function can be apllied before bn or not
 #TODO implement DropBlock layer, maybe?
 #TODO understand why "multiply" in spatial attention
+
+
+class ActivationFunction():
+    def __init__(self, name):
+        self.name = name
+    
+    def get_funct(self):
+        if self.name == 'mish':
+            return Mish()
+        elif self.name == 'leaky':
+            return LeakyReLU(0.1)
+        elif self.name == 'sigmoid':
+            return Activation(tf.nn.sigmoid)
+        else:
+            return Activation('linear', dtype=tf.float32)
+            
 class CNNBlock(Layer):
     def __init__(self, num_filters, kernel_size, bn_act=True, padding='same', activation='leaky', **kwargs):
         super().__init__()
         self.padding = padding
-        if activation != 'mish':
-            self.conv = Conv2D(filters=num_filters, kernel_size=kernel_size, activation=activation, use_bias=not bn_act, **kwargs)
-        else:
-            self.conv = Conv2D(filters=num_filters, kernel_size=kernel_size, use_bias=not bn_act, **kwargs)
+        self.conv = Conv2D(filters=num_filters, kernel_size=kernel_size, use_bias=not bn_act, **kwargs)
         self.bn = BatchNormalization()
-        #self.leaky = LeakyReLU(0.1)
+        self.activation = ActivationFunction(activation).get_funct()
         self.use_bn_act = bn_act
 
         self.zero_padding = ZeroPadding2D(padding=(1,1))
-        self.mish = Mish()
-        self.activation = activation
 
-    def call(self, input_tensor):
-        if self.activation == 'mish':
-            if self.padding == 'same':
-                if self.use_bn_act:
-                    return self.mish(self.bn(self.conv(input_tensor)))
-                else:
-                    return self.conv(input_tensor)
-            else:
-                if self.use_bn_act:
-                    z = self.zero_padding(input_tensor)
-                    return self.mish(self.bn(self.conv(z)))
-                else:
-                    z = self.zero_padding(input_tensor)
-                    return self.conv(z)
-        else:
-            if self.padding == 'same':
-                if self.use_bn_act:
-                    return self.bn(self.conv(input_tensor))
-                else:
-                    return self.conv(input_tensor)
-            else:
-                if self.use_bn_act:
-                    z = self.zero_padding(input_tensor)
-                    return self.bn(self.conv(z))
-                else:
-                    z = self.zero_padding(input_tensor)
-                    return self.conv(z)
+    def call(self, x):
+        if self.padding != 'same':
+            x = self.zero_padding(x)
+        x = self.conv(x)
+
+        if self.use_bn_act:
+            x = self.bn(x)
+            x = self.activation(x)
+        return x
 
 class Mish(Layer):
     def __init__(self, **kwargs):
@@ -142,22 +135,24 @@ class SpatialAttention(Layer):
         return tf.multiply(x, y)
 
 
+
+
 class ScalePrediction(Layer):
     def __init__(self, num_filters, **kwargs):
         super().__init__(**kwargs)
-        self.pred = tf.keras.Sequential(
+        self.pred = tf.keras.Sequential([
             CNNBlock(num_filters = num_filters, kernel_size=3),
             CNNBlock(num_filters=(NUM_CLASSES + 5) * 3, 
                     bn_act=False, 
                     kernel_size=1,
                     activation='linear'
-                ),
+                )]
         )
 
     def call(self, x):
         x = self.pred(x)
         x = tf.reshape(x, 
-            (-1, tf.shape(x)[1], tf.shape(x)[2], 3, NUM_CLASSES + 5))
+            [-1, tf.shape(x)[1], tf.shape(x)[2], 3, NUM_CLASSES + 5])
         return x
         
 
