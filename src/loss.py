@@ -1,14 +1,29 @@
+from typing import ClassVar
+import numpy as np
+
 import tensorflow as tf
 from tensorflow.keras.losses import Loss, binary_crossentropy
 
 from configs.yolo_v4 import NUM_CLASSES, loss_params
 
 class YoloLoss(Loss):
-    def __init__(self, **kwargs):
+    def __init__(self, 
+                smooth_factor=0.0, 
+                use_giou=False, 
+                use_ciou=False, 
+                use_diou=False, 
+                **kwargs):
         super().__init__(**kwargs)
-        self.anchors = '' #TODO
+        self.smooth_factor = smooth_factor
+        self.use_giou = use_giou
+        self.use_ciou = use_ciou
+        self.use_diou = use_diou
+        self.anchors = '' #TODO understand how to create the anchors
 
-    def interpret_boxes(self, pred):
+    def label_smoothing(self, true_labels):
+        return true_labels * (1.0 - self.smooth_factor) + self.smooth_factor / NUM_CLASSES
+        
+    def interpret_prediction_boxes(self, pred):
         grid_size = tf.shape(pred)[1]
         box_xy, box_wh, objectness, probs = tf.split(pred, (2, 2, 1, -1), axis=-1)
 
@@ -28,4 +43,122 @@ class YoloLoss(Loss):
         bbox = tf.concat([box_x1y1, box_x2y2], axis=-1)
 
         return bbox, objectness, probs, box
+    
+    def get_true_scores(self, y_true):
+        true_box, true_obj, true_class = tf.split(
+            y_true, (4, 1, self.num_class), axis=-1)
+        true_xy = true_box[..., 0:2]
+        true_wh = true_box[..., 2:4]
+        
+        return true_xy, true_wh, true_obj, true_class
 
+    def interpret_true_boxes(self, y_true):
+        grid_size = tf.shape(y_true)[1]
+        grid = tf.meshgrid(tf.range(grid_size), tf.range(grid_size))
+        grid = tf.expand_dims(tf.stack(grid, axis=-1), axis=2)
+
+        true_xy, true_wh, _, _ = self.get_true_scores(y_true)
+        true_xy = true_xy * tf.cast(grid_size, tf.float32) - \
+                      tf.cast(grid, tf.float32)
+        true_wh = tf.math.log(true_wh / self.anchors)
+        true_wh = tf.where(tf.math.is_inf(true_wh),
+                               tf.zeros_like(true_wh), true_wh)
+
+        return true_xy, true_wh
+
+    def iou(self, box_true, box_pred):
+        width = tf.maximum(tf.minimum(box_true[..., 2], box_pred[..., 2]) -
+                           tf.maximum(box_true[..., 0], box_pred[..., 0]), 0)
+        height = tf.maximum(tf.minimum(box_true[..., 3], box_pred[..., 3]) -
+                           tf.maximum(box_true[..., 1], box_pred[..., 1]), 0)
+        area = width * height
+        box_true_area = (box_true[..., 2] - box_true[..., 0]) * \
+                     (box_true[..., 3] - box_true[..., 1])
+        box_pred_area = (box_pred[..., 2] - box_pred[..., 0]) * \
+                     (box_pred[..., 3] - box_pred[..., 1])
+
+        area_union = box_true_area + box_pred_area - area
+        iou = tf.math.divide_no_nan(area, area_union)
+        
+        return area_union, iou
+    
+    def broadcast_iou(self, box_true, box_pred):
+        # broadcast boxes
+        box_true = tf.expand_dims(box_true, -2)
+        box_pred = tf.expand_dims(box_pred, 0)
+        # new_shape: (..., N, (x1, y1, x2, y2))
+        new_shape = tf.broadcast_dynamic_shape(tf.shape(box_true), tf.shape(box_pred))
+        box_true = tf.broadcast_to(box_true, new_shape)
+        box_pred = tf.broadcast_to(box_pred, new_shape)
+
+        iou = self.iou(box_true, box_pred)
+
+        return iou
+
+    def giou(self, box_true, box_pred):
+        area_union, iou = self.iou(box_true, box_pred)
+
+        enclose_left_up = tf.minimum(box_true[..., :2], box_pred[..., :2])
+        enclose_right_down = tf.maximum(box_true[..., 2:], box_pred[..., 2:])
+        enclose = tf.maximum(enclose_right_down - enclose_left_up, 0.0)
+        enclose_area = enclose[..., 0] * enclose[..., 1]
+        giou = iou - 1.0 * tf.math.divide_no_nan((enclose_area - area_union), enclose_area)
+
+        return giou
+
+    def diou(self, box_true, box_pred):
+
+        _, iou = self.iou(box_true,box_pred)
+
+        # find enclosed area
+        enclose_left_up = tf.minimum(box_true[..., :2], box_pred[..., :2])
+        enclose_right_down = tf.maximum(box_true[..., 2:], box_pred[..., 2:])
+
+        enclose_wh = enclose_right_down - enclose_left_up
+        c2 = tf.square(enclose_wh[..., 0]) + tf.square(enclose_wh[..., 1])
+
+        box_true_center_x = (box_true[..., 0] + box_true[..., 2]) / 2
+        box_true_center_y = (box_true[..., 1] + box_true[..., 3]) / 2
+        box_pred_center_x = (box_pred[..., 0] + box_pred[..., 2]) / 2
+        box_pred_center_y = (box_pred[..., 1] + box_pred[..., 3]) / 2
+
+        d = tf.square(box_true_center_x - box_pred_center_x) + tf.square(box_true_center_y - box_pred_center_y)
+
+        diou = 1.0 - iou + tf.math.divide_no_nan(d, c2)
+
+        return diou
+
+    def ciou(self, box_true, box_pred):
+        diou = self.diou(box_true, box_pred)
+        _, iou = self.iou(box_true, box_pred)
+
+        box_true_w, box_true_h = box_true[..., 2] - box_true[..., 0], box_true[..., 3] - box_true[..., 1]
+        box_pred_w, box_pred_h = box_pred[..., 2] - box_pred[..., 0], box_pred[..., 3] - box_pred[..., 1]
+
+        atan = tf.atan(tf.math.divide_no_nan(box_true_w, box_true_h)) - tf.atan(tf.math.divide_no_nan(box_pred_w, box_pred_h))
+        v = (atan * 2 / np.pi) ** 2
+        alpha = tf.stop_gradient(tf.math.divide_no_nan(v, 1 - iou + v))
+
+        ciou = diou - alpha * v
+
+        return ciou
+
+    #TODO maybe?
+    def focal_loss(self):
+        # https://www.analyticsvidhya.com/blog/2020/08/a-beginners-guide-to-focal-loss-in-object-detection/
+        pass
+
+    def compute_loss(self, y_true, y_pred):
+        box_pred, obj_pred, class_pred, raw_box_pred = self.interpret_prediction_boxes(y_pred)
+
+        xy_true, wh_true, obj_true, class_true = self.get_true_scores(y_pred)
+        box_true = tf.concat([xy_true - wh_true/2.0, xy_true + wh_true/2.0], axis=-1)
+
+        class_true = self.label_smoothing(class_true)
+        weights = 2 - wh_true[..., 0] * wh_true[..., 1]
+
+        # in order to element-wise multiply the result from tf.reduce_sum
+        # we need to squeeze one dimension for objectness here
+        obj_mask = tf.squeeze(obj_true, axis=-1)
+
+        #TODO: Finish method
