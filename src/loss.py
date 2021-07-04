@@ -1,4 +1,3 @@
-from typing import ClassVar
 import numpy as np
 
 import tensorflow as tf

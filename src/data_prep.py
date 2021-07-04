@@ -7,6 +7,7 @@ from astropy.io import fits
 import astropy.wcs as pywcs
 from astropy.nddata.utils import Cutout2D
 from astropy.io.fits.verify import VerifyWarning
+from configs.yolo_v4 import IMG_SIZE
 
 #Suppressing Warnings
 import warnings 
@@ -21,22 +22,23 @@ import matplotlib.patches as patches
 from tqdm import tqdm
 
 #Globals Values
-IMG_SIZE = 128
-RANGE_MIN= 16384
-RANGE_MAX = 20096
 KAPPA = 0.5
-
-#Global Paths
-IMG_PATH = './data/raw/SKAMid_B1_1000h_v3.fits'
-TRAINING_SET_PATH = './training_set/TrainingSet_B1_v2.txt'
-CUTOUTS_PATH = './data/training/B1_1000h/'
-
 
 def showImage():
 	img = mpimg.imread('/data/imageResult1.png')
 	imgplot = plt.imshow(img)
 	plt.show()
 
+def get_boundaries(x, y):
+	min_x, max_x = x.min(), x.max()
+	min_y, max_y = y.min(), y.max()
+	minimum = min(min_x, min_y)
+	maximum = max(max_x, max_y)
+	minimum = (int(minimum / IMG_SIZE) - 1) * IMG_SIZE
+	maximum = (int(maximum / IMG_SIZE) + 1) * IMG_SIZE
+	return minimum, maximum
+
+'''
 def showDataSet():
 	TrainingSet=pd.read_csv(TRAINING_SET_PATH, skiprows=17,delimiter='\s+')
 	TrainingSet=TrainingSet[TrainingSet.columns[0:15]]
@@ -67,7 +69,7 @@ def deb_plot(x, y):
 	plt.show()
 
 	return
-
+'''
 def adjustSemiAxes(major,minor,category,size,BMAJ_RATIO,BMIN_RATIO,G_SQUARED):
 
 	if category == 1 and size == 1:
@@ -110,14 +112,14 @@ def plot_images_and_bbox(ax, img_array, category, centroid_x, centroid_y, xmin, 
 	ax.text(xmin,ymin,text,c=color)
 
 #For now filters with the threshold but should works with everything I hope
-def newDivideImages(plot=False):
+def newDivideImages(img_path, training_set_path, cutouts_path, plot=False):
 
 	#Prep Image
-	fits_img = fits.open(IMG_PATH)
+	fits_img = fits.open(img_path)
 	fits_img = make_fits_2D(fits_img[0])
 	
 	#Prep Training Set
-	TrainingSet = pd.read_csv(TRAINING_SET_PATH, skiprows=17, delimiter='\s+')
+	TrainingSet = pd.read_csv(training_set_path, skiprows=17, delimiter='\s+')
 	TrainingSet = TrainingSet[TrainingSet.columns[0:15]]
 	TrainingSet.columns = ['ID', 'RA (core)', 'DEC (core)', 'RA (centroid)', 'DEC (centroid)',
                         'FLUX', 'Core frac', 'BMAJ', 'BMIN', 'PA', 'SIZE', 'CLASS', 'SELECTION', 'x', 'y']
@@ -134,6 +136,8 @@ def newDivideImages(plot=False):
 	BMIN_RATIO = BMIN_TOT / X_PIXEL_RES
 	G_SQARED = (2 * X_PIXEL_RES * 3600) ** 2
 	WORLD_REF = pywcs.WCS(fits_img.header).deepcopy()
+	RANGE_MIN, RANGE_MAX = get_boundaries(TrainingSet['x'], TrainingSet['y'])
+	print(RANGE_MIN, RANGE_MAX)
 
 	fits_img = fits_img.data[0,0]
 	#sigma = np.std(fits_img)
@@ -142,8 +146,6 @@ def newDivideImages(plot=False):
 	training_data = {
 		'class': [],
 		'img_path': [],
-		'height': [],
-		'width': [],
 		'xmax': [],
 		'xmin': [],
 		'ymax': [],
@@ -156,8 +158,8 @@ def newDivideImages(plot=False):
 	#sigma = np.std(fits_img[RANGE_MIN:RANGE_MAX, RANGE_MIN:RANGE_MAX])
 	rms = np.sqrt(np.mean(fits_img[RANGE_MIN:RANGE_MAX, RANGE_MIN:RANGE_MAX] ** 2))
 
-	for i in tqdm(range(RANGE_MIN,RANGE_MAX,IMG_SIZE), desc='Loading...'):
-		for j in range(RANGE_MIN,RANGE_MAX,IMG_SIZE):
+	for i in tqdm(range(RANGE_MIN, RANGE_MAX, IMG_SIZE), desc='Loading...'):
+		for j in range(RANGE_MIN, RANGE_MAX, IMG_SIZE):
 			#Query
 			pos = (i+(IMG_SIZE/2), j+(IMG_SIZE/2))
 			img_fits = Cutout2D(fits_img, position=pos,size=IMG_SIZE, wcs=WORLD_REF, copy=True)
@@ -165,8 +167,10 @@ def newDivideImages(plot=False):
 			small_ts = TrainingSet.query('x < @i+@IMG_SIZE and x >= @i and y < @j+@IMG_SIZE and y >= @j and FLUX > (@rms * @KAPPA) and SELECTION == 1')
 			
 			if len(small_ts) > 0:
-				filename = f'img-{i}-{j}.png'
-				plt.imsave(CUTOUTS_PATH + filename, img_array, cmap='gist_heat', origin='lower')
+				prefix_index = img_path.find('B')
+				prefix = img_path[prefix_index:prefix_index+2]
+				filename = f'{prefix}img-{i}-{j}.png'
+				plt.imsave(cutouts_path + filename, img_array, cmap='gist_heat', origin='lower')
 				if plot:
 					_, ax = plt.subplots()
 				for _, row in small_ts.iterrows():
@@ -187,17 +191,15 @@ def newDivideImages(plot=False):
 					xmin, ymin, xmax, ymax = ellipse_to_box(phi, major, minor, centroid_x, centroid_y)
 					xmin = max(xmin, 0)
 					ymin = max(ymin, 0)
-					xmax = min(xmax,IMG_SIZE-1)
-					ymax = min(ymax,IMG_SIZE-1)
+					xmax = min(xmax, IMG_SIZE-1)
+					ymax = min(ymax, IMG_SIZE-1)
 
 					training_data['img_path'].append(filename)
 					training_data['class'].append(row.CLASS)
-					training_data['height'].append(ymax-ymin)
-					training_data['width'].append(xmax - xmin)
-					training_data['xmax'].append(xmax)
-					training_data['xmin'].append(xmin)
-					training_data['ymax'].append(ymax)
-					training_data['ymin'].append(ymin)
+					training_data['xmax'].append(xmax / IMG_SIZE)
+					training_data['xmin'].append(xmin / IMG_SIZE)
+					training_data['ymax'].append(ymax / IMG_SIZE)
+					training_data['ymin'].append(ymin / IMG_SIZE)
 					
 					if plot:
 						plot_images_and_bbox(ax, img_array, row.CLASS, centroid_x, 
@@ -206,7 +208,7 @@ def newDivideImages(plot=False):
 			if plot:
 				plt.show()
 	training_df = pd.DataFrame.from_dict(training_data)
-	training_df.to_csv(CUTOUTS_PATH + 'galaxies_560Hz.csv')
+	training_df.to_csv(cutouts_path + 'galaxies.csv', index=False)
 	print("GLOBAL = ", global_count)
 	print("FILTERED = ", filtered_count)
 
@@ -236,7 +238,7 @@ def make_fits_2D(hdu):
 	for keyword in to_delete:
 		del hdu.header[keyword]
 	return hdu
-
+""""
 def train_test_split(filepath, test_size=0.20):
 	data = pd.read_csv(filepath)
 	print(len(data.img_path))
@@ -245,6 +247,7 @@ def train_test_split(filepath, test_size=0.20):
 	test_paths = np.random.choice(file_paths, size=sample_num)
 	print(len(test_paths))
 	print(len(file_paths))
+"""
 
-newDivideImages()
+#newDivideImages()
 #train_test_split(filepath=CUTOUTS_PATH + 'galaxies_560Hz.csv')

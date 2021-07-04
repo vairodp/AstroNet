@@ -11,13 +11,20 @@ List is structured by "B" indicating a residual block followed by the number of 
 
 NUM_CLASSES = 3
 
-IMG_SIZE = 128
+IMG_SIZE = 256
 
 ANCHORS = np.array([(12,16),  (19,36),  (40,28),  (36,75),  (76,55),  
                     (72,146),  (142,110),  (192,243),  (459,401)],
                     np.float32) / IMG_SIZE
 
 ANCHORS_MASKS =  np.array([[6, 7, 8], [3, 4, 5], [0, 1, 2]])
+
+BATCH_SIZE = 32
+BUFFER_SIZE = 100
+PREFETCH_SIZE = 2
+MAX_NUM_BBOXES = 300
+
+BASEDIR = "/Documents/uni-projects/SKA-DC1/data"
 
 #Backbone
 cspdarknet53 = [
@@ -87,5 +94,6 @@ head = [
 ]
 
 loss_params = {
-    'sensitivity_factor': 1.1
+    'sensitivity_factor': 1.1,
+    'iou_threshold': 0.45
 }

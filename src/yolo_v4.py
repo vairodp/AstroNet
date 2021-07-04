@@ -76,15 +76,14 @@ class ResidualBlock(Layer):
 class CSPBlock(Layer):
     def __init__(self, num_filters, num_residual_blocks=1):
         super().__init__()
-        self.part_1 = CNNBlock(out_channels=num_filters, padding='valid',
+        self.part_1 = CNNBlock(num_filters=num_filters, padding='valid',
                              activation='mish', kernel_size=3, strides=2)
-        self.part_2 = tf.keras.Sequential(
+        self.part_2 = tf.keras.Sequential([
             CNNBlock(num_filters=num_filters//2, padding='same',
                              activation='mish', kernel_size=1, strides=1),
-            ResidualBlock(num_filters=num_filters//2, num_repeats=num_residual_blocks),
+            ResidualBlock(num_filters=num_filters//2, repeats=num_residual_blocks),
             CNNBlock(num_filters=num_filters//2, padding='same',
-                             activation='mish', kernel_size=1, strides=1)
-            
+                             activation='mish', kernel_size=1, strides=1)]            
         )
     
     def call(self, x):
@@ -191,7 +190,7 @@ class Neck(Layer):
                 if module[0] == 'SPP':
                     self.layers[size].append(SPPBlock())
                 elif module[0] == 'U':
-                    self.upsamplings[size] = UpSampling(size=module[1])
+                    self.upsamplings[size] = UpSampling(num_filters=module[1])
                 elif module[0] == 'A':
                     for _ in range(module[1]):
                         self.attentions.append(SpatialAttention())
