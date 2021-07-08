@@ -1,7 +1,0 @@
-# Use this directory only for storing fits images you want to work with
-
-# Ignore everything in this directory
-
-*
-# Except this file
-!.gitignore
