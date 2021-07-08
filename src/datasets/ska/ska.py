@@ -8,19 +8,17 @@ import tensorflow_datasets as tfds
 from configs.yolo_v4 import IMG_SIZE, BASEDIR
 from data_prep import newDivideImages
 
-ABSOLUTE_BASEDIR = os.path.expanduser("~") + BASEDIR
-
 PATHS = {
-  'B1_1000h': ABSOLUTE_BASEDIR +'/raw/SKAMid_B1_1000h_v3.fits',
-  'B2_1000h': ABSOLUTE_BASEDIR  + '/raw/SKAMid_B2_1000h_v3.fits',
-  'B5_1000h': ABSOLUTE_BASEDIR  + '/raw/SKAMid_B5_1000h_v3.fits',
-  'ANNOT_B1': ABSOLUTE_BASEDIR  + '/raw/TrainingSet_B1_v2.txt',
-  'ANNOT_B2': ABSOLUTE_BASEDIR  + '/raw/TrainingSet_B2_v2.txt',
-  'ANNOT_B5': ABSOLUTE_BASEDIR  + '/raw/TrainingSet_B5_v2.txt',
-  'CUTOUTS_B1': ABSOLUTE_BASEDIR  + '/training/B1_1000h/',
-  'CUTOUTS_B2': ABSOLUTE_BASEDIR  + '/training/B2_1000h/',
-  'CUTOUTS_B5': ABSOLUTE_BASEDIR  + '/training/B5_1000h/',
-  'TRAINING': ABSOLUTE_BASEDIR + '/training'
+  'B1_1000h': '../data/raw/SKAMid_B1_1000h_v3.fits',
+  'B2_1000h': '../data/raw/SKAMid_B2_1000h_v3.fits',
+  'B5_1000h': '../data/raw/SKAMid_B5_1000h_v3.fits',
+  'ANNOT_B1': '../data/raw/TrainingSet_B1_v2.txt',
+  'ANNOT_B2': '../data/raw/TrainingSet_B2_v2.txt',
+  'ANNOT_B5': '../data/raw/TrainingSet_B5_v2.txt',
+  'CUTOUTS_B1': '../data/training/B1_1000h/',
+  'CUTOUTS_B2': '../data/training/B2_1000h/',
+  'CUTOUTS_B5': '../data/training/B5_1000h/',
+  'TRAINING': '../data/training'
 }
 
 _DATA_B1_1000h = 'https://owncloud.ia2.inaf.it/index.php/s/hbasFhd4YILNkCr/download'
@@ -107,7 +105,7 @@ class SKA(tfds.core.GeneratorBasedBuilder):
   
   def _rename_paths(self, paths):
     for path in paths:
-      dir_path = os.path.expanduser("~") + BASEDIR + "/raw/"
+      dir_path = "../data/raw/"
       info_path = dir_path + path.name + '.INFO'
       with open(info_path, mode='r') as info_file:
         info = json.load(info_file)

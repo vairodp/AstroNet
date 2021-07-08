@@ -8,7 +8,7 @@ import math
 
 import datasets.ska
 from configs.yolo_v4 import IMG_SIZE, BUFFER_SIZE, BATCH_SIZE, PREFETCH_SIZE
-from configs.yolo_v4 import MAX_NUM_BBOXES, ANCHORS, ANCHORS_MASKS, NUM_CLASSES, BASEDIR
+from configs.yolo_v4 import MAX_NUM_BBOXES, ANCHORS, ANCHORS_MASKS, NUM_CLASSES
 
 SPLITS = {
     'train': 'train[:80%]',
@@ -19,7 +19,7 @@ SPLITS = {
 class SKADataset:
     def __init__(self, mode='train'):
         self.mode = mode
-        data_dir = os.path.expanduser("~") + BASEDIR
+        data_dir = "../data"
         download_dir = data_dir + "\\raw"
         self.dataset = tfds.load('ska', split=SPLITS[mode], 
                                 shuffle_files=True, 

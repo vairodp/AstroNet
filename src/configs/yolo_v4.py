@@ -24,8 +24,6 @@ BUFFER_SIZE = 100
 PREFETCH_SIZE = 2
 MAX_NUM_BBOXES = 300
 
-BASEDIR = "/Documents/uni-projects/SKA-DC1/data"
-
 #Backbone
 cspdarknet53 = [
     (32, 3, 1, 'same', 'mish'),
