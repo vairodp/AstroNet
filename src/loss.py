@@ -5,6 +5,7 @@ from tensorflow.keras.losses import Loss, binary_crossentropy
 
 from configs.yolo_v4 import ANCHORS, ANCHORS_MASKS, NUM_CLASSES, loss_params
 
+
 class YoloLoss(Loss):
     def __init__(self, 
                 iou_threshold,
@@ -48,7 +49,7 @@ class YoloLoss(Loss):
     
     def get_true_scores(self, y_true):
         true_box, true_obj, true_class = tf.split(
-            y_true, (4, 1, self.num_class), axis=-1)
+            y_true, (4, 1, NUM_CLASSES), axis=-1)
         true_xy = true_box[..., 0:2]
         true_wh = true_box[..., 2:4]
         
@@ -86,14 +87,20 @@ class YoloLoss(Loss):
     
     def broadcast_iou(self, box_true, box_pred):
         # broadcast boxes
+        #box_true = tf.reshape(box_true, (-1, 4))
+        #print('NEW BOX TRUE: ' , box_true.shape)
+
+        #box_true = box_true[:,-1]
+        
         box_pred = tf.expand_dims(box_pred, -2)
         box_true = tf.expand_dims(box_true, 0)
+        
         # new_shape: (..., N, (x1, y1, x2, y2))
         new_shape = tf.broadcast_dynamic_shape(tf.shape(box_pred), tf.shape(box_true))
         box_true = tf.broadcast_to(box_true, new_shape)
         box_pred = tf.broadcast_to(box_pred, new_shape)
 
-        iou = self.iou(box_true, box_pred)
+        _, iou = self.iou(box_true, box_pred)
 
         return iou
 
@@ -140,7 +147,7 @@ class YoloLoss(Loss):
         atan = tf.atan(tf.math.divide_no_nan(box_true_w, box_true_h)) - tf.atan(tf.math.divide_no_nan(box_pred_w, box_pred_h))
         v = (atan * 2 / np.pi) ** 2
         alpha = tf.stop_gradient(tf.math.divide_no_nan(v, 1 - iou + v))
-
+        
         ciou = diou - alpha * v
 
         return ciou
@@ -153,7 +160,7 @@ class YoloLoss(Loss):
     def compute_loss(self, y_true, y_pred, anchors):
         box_pred, obj_pred, class_pred, raw_box_pred = self.interpret_prediction_boxes(y_pred, anchors)
 
-        xy_true, wh_true, obj_true, class_true = self.get_true_scores(y_pred)
+        xy_true, wh_true, obj_true, class_true = self.get_true_scores(y_true)
         box_true = tf.concat([xy_true - wh_true/2.0, xy_true + wh_true/2.0], axis=-1)
 
         class_true = self.label_smoothing(class_true)
@@ -162,10 +169,15 @@ class YoloLoss(Loss):
         # in order to element-wise multiply the result from tf.reduce_sum
         # we need to squeeze one dimension for objectness here
         obj_mask = tf.squeeze(obj_true, axis=-1)
-        filtered_box_true = tf.boolean_mask(box_true, tf.cast(obj_mask, tf.bool))
-        best_iou, _ = tf.map_fn(lambda x: (tf.reduce_max(self.broadcast_iou(x[0], x[1]), axis=-1), 0), 
-                                (filtered_box_true, box_pred))
-
+        #filtered_box_true = tf.boolean_mask(box_true, tf.cast(obj_mask, tf.bool))
+        #print("BOX TRUE FILTERED: ", filtered_box_true.shape)
+        #broadcasted_ious = self.broadcast_iou(filtered_box_true, box_pred)
+        #best_iou, _ = tf.map_fn(lambda x: (tf.reduce_max(x, axis=-1), 0), 
+                                #broadcasted_ious)
+        best_iou, _, _ = tf.map_fn(
+            lambda x: (tf.reduce_max(self.broadcast_iou(tf.boolean_mask(
+                x[1], tf.cast(x[2], tf.bool)), x[0]), axis=-1), 0, 0),
+            (box_pred, box_true, obj_mask))
         ignore_mask = tf.cast(best_iou < self.iou_threshold, tf.float32)
 
         '''

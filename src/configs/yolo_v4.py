@@ -11,7 +11,7 @@ List is structured by "B" indicating a residual block followed by the number of 
 
 NUM_CLASSES = 3
 
-IMG_SIZE = 256
+IMG_SIZE = 128
 
 ANCHORS = np.array([(12,16),  (19,36),  (40,28),  (36,75),  (76,55),  
                     (72,146),  (142,110),  (192,243),  (459,401)],

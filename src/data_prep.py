@@ -1,6 +1,7 @@
 #Utilities
 import pandas as pd
 import numpy as np
+import math
 
 #Astropy
 from astropy.io import fits
@@ -158,7 +159,7 @@ def newDivideImages(img_path, training_set_path, cutouts_path, plot=False):
 	#sigma = np.std(fits_img[RANGE_MIN:RANGE_MAX, RANGE_MIN:RANGE_MAX])
 	rms = np.sqrt(np.mean(fits_img[RANGE_MIN:RANGE_MAX, RANGE_MIN:RANGE_MAX] ** 2))
 
-	for i in tqdm(range(RANGE_MIN, RANGE_MAX, IMG_SIZE), desc='Loading...'):
+	for i in tqdm(range(RANGE_MIN, RANGE_MAX, IMG_SIZE), desc='Preparing images...'):
 		for j in range(RANGE_MIN, RANGE_MAX, IMG_SIZE):
 			#Query
 			pos = (i+(IMG_SIZE/2), j+(IMG_SIZE/2))
@@ -170,6 +171,7 @@ def newDivideImages(img_path, training_set_path, cutouts_path, plot=False):
 				prefix_index = img_path.find('B')
 				prefix = img_path[prefix_index:prefix_index+2]
 				filename = f'{prefix}img-{i}-{j}.png'
+				img_array = power(img_array, power_index=1.2, scale_min=0.0)
 				plt.imsave(cutouts_path + filename, img_array, cmap='gist_heat', origin='lower')
 				if plot:
 					_, ax = plt.subplots()
@@ -195,7 +197,7 @@ def newDivideImages(img_path, training_set_path, cutouts_path, plot=False):
 					ymax = min(ymax, IMG_SIZE-1)
 
 					training_data['img_path'].append(filename)
-					training_data['class'].append(row.CLASS)
+					training_data['class'].append(row.CLASS - 1)
 					training_data['xmax'].append(xmax / IMG_SIZE)
 					training_data['xmin'].append(xmin / IMG_SIZE)
 					training_data['ymax'].append(ymax / IMG_SIZE)
@@ -238,6 +240,24 @@ def make_fits_2D(hdu):
 	for keyword in to_delete:
 		del hdu.header[keyword]
 	return hdu
+
+def power(inputArray, power_index=3.0, scale_min=None, scale_max=None):
+
+	imageData=np.array(inputArray, copy=True)
+	
+	if scale_min == None:
+		scale_min = imageData.min()
+	if scale_max == None:
+		scale_max = imageData.max()
+	factor = 1.0 / math.pow((scale_max - scale_min), power_index)
+	indices0 = np.where(imageData < scale_min)
+	indices1 = np.where((imageData >= scale_min) & (imageData <= scale_max))
+	indices2 = np.where(imageData > scale_max)
+	imageData[indices0] = 0.0
+	imageData[indices2] = 1.0
+	imageData[indices1] = np.power((imageData[indices1] - scale_min), power_index)*factor
+
+	return imageData
 """"
 def train_test_split(filepath, test_size=0.20):
 	data = pd.read_csv(filepath)
@@ -249,5 +269,8 @@ def train_test_split(filepath, test_size=0.20):
 	print(len(file_paths))
 """
 
-#newDivideImages()
+#newDivideImages(img_path='../data/raw/SKAMid_B5_1000h_v3.fits', 
+#				training_set_path='../data/raw/TrainingSet_B5_v2.txt',
+#				cutouts_path='../data/training/B5_1000h/', plot=True)
+
 #train_test_split(filepath=CUTOUTS_PATH + 'galaxies_560Hz.csv')

@@ -28,7 +28,10 @@ class CNNBlock(Layer):
     def __init__(self, num_filters, kernel_size, bn_act=True, padding='same', activation='leaky', **kwargs):
         super().__init__()
         self.padding = padding
-        self.conv = Conv2D(filters=num_filters, kernel_size=kernel_size, use_bias=not bn_act, **kwargs)
+        if self.padding != 'same':
+            self.conv = Conv2D(filters=num_filters, kernel_size=kernel_size, use_bias=not bn_act, **kwargs)
+        else:
+            self.conv = Conv2D(filters=num_filters, kernel_size=kernel_size, use_bias=not bn_act, padding=self.padding, **kwargs)
         self.bn = BatchNormalization()
         self.activation = ActivationFunction(activation).get_funct()
         self.use_bn_act = bn_act
@@ -58,9 +61,9 @@ class ResidualBlock(Layer):
         self.layers = []
         for _ in range(repeats):
             self.layers.append(
-                tf.keras.Sequential(
+                tf.keras.Sequential([
                     CNNBlock(num_filters=num_filters, kernel_size=1, activation='mish'),
-                    CNNBlock(num_filters=num_filters, kernel_size=3, activation='mish', padding = 'same'),
+                    CNNBlock(num_filters=num_filters, kernel_size=3, activation='mish', padding = 'same')]
                     ))
         self.use_residual = use_residual
         self.repeats = repeats
@@ -76,8 +79,11 @@ class ResidualBlock(Layer):
 class CSPBlock(Layer):
     def __init__(self, num_filters, num_residual_blocks=1):
         super().__init__()
-        self.part_1 = CNNBlock(num_filters=num_filters, padding='valid',
+        self.downsampling = CNNBlock(num_filters=num_filters, padding='valid',
                              activation='mish', kernel_size=3, strides=2)
+        self.part_1 = CNNBlock(num_filters=num_filters//2, padding='same',
+                             activation='mish', kernel_size=1, strides=1)
+
         self.part_2 = tf.keras.Sequential([
             CNNBlock(num_filters=num_filters//2, padding='same',
                              activation='mish', kernel_size=1, strides=1),
@@ -87,10 +93,11 @@ class CSPBlock(Layer):
         )
     
     def call(self, x):
+        x = self.downsampling(x)
         part_1 = self.part_1(x)
         part_2 = self.part_2(x)
 
-        x = tf.concat([part_1, part_2], -1)
+        x = Concatenate()([part_1, part_2])
 
         return x
     
@@ -203,7 +210,7 @@ class Neck(Layer):
                                                 strides=strides)
 
     def call(self, x):
-        out_small, out_medium, out_large = x
+        out_large, out_medium, out_small = x
         
         for layer in self.layers['S']:
             out_small = layer(out_small)
@@ -271,7 +278,7 @@ class Head(Layer):
         output_medium = self.layers['M'][-2](output_medium)
 
         medium_downsampled = self.layers['M'][-1](shortcut_medium)
-        output_small = self.cocnat([medium_downsampled, output_small])
+        output_small = self.concat([medium_downsampled, output_small])
 
         for layer in self.layers['S']:
             output_small = layer(output_small)
@@ -310,7 +317,7 @@ class YoloV4(tf.keras.Model):
             if i in [6, 8, 10]:
                 outputs_backbone.append(layer(x))
             x = layer(x)
-        x = Neck(x)
-        x = Head(x)
+        x = self.neck(outputs_backbone)
+        x = self.head(x)
         return x
     

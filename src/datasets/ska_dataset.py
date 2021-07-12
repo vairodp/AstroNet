@@ -20,23 +20,25 @@ class SKADataset:
     def __init__(self, mode='train'):
         self.mode = mode
         data_dir = "../data"
-        download_dir = data_dir + "\\raw"
+        download_dir = data_dir + "/raw"
         self.dataset = tfds.load('ska', split=SPLITS[mode], 
                                 shuffle_files=True, 
                                 data_dir=data_dir,
-                                #download=False,
+                                download=False,
                                 download_and_prepare_kwargs={'download_dir': download_dir})
     
     def transform_bbox(self, bbox):
         # bbox = [ymin, xmin, ymax, xmax] ---> [x, y, width, height]
-        ymin, xmin = bbox[..., 0:2]
-        ymax, xmax = bbox[..., 2:4]
+        ymin = bbox[..., 0]
+        xmin = bbox[..., 1]
+        ymax = bbox[..., 2]
+        xmax = bbox[..., 3]
         x = (xmin + xmax) / 2
         y = (ymin + ymax) / 2
         height = ymax - ymin
         width = xmax - xmin
-
-        return np.concatenate([x,y,width, height], axis=-1)
+        
+        return np.vstack([x,y,width, height]).T
     
     def map_label(self, bbox, label):
         # bbox = [x, y, width, height] values in [0, IMG_SIZE]
@@ -110,7 +112,8 @@ class SKADataset:
         label_small, label_medium, label_large = tf.numpy_function(self.map_label, inp=[bbox, label],
                                                                    Tout=[tf.float32, tf.float32, tf.float32])
         # normalize to [-1, 1]
-        image = image / 127.5 - 1
+        image = tf.cast(image, tf.float32)
+        image = image / 127.5 - 1.0
 
         bbox = self.concat_class(bbox, label)
         bbox = self.pad_bbox(bbox)
@@ -127,7 +130,7 @@ class SKADataset:
     def pad_bbox(self,bbox):
         # bbox.shape = (n, 5)
         bbox = tf.expand_dims(bbox, axis=-1)  # bbox.shape = (n, 5, 1)
-        bbox = tf.image.pad_to_bounding_box(bbox, 0, 0, self.max_bbox_size, tf.shape(bbox)[1])
+        bbox = tf.image.pad_to_bounding_box(bbox, 0, 0, MAX_NUM_BBOXES, tf.shape(bbox)[1])
 
         bbox = tf.squeeze(bbox)
 
