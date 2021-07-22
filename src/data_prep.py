@@ -115,6 +115,12 @@ def plot_images_and_bbox(ax, img_array, category, centroid_x, centroid_y, xmin, 
 #For now filters with the threshold but should works with everything I hope
 def newDivideImages(img_path, training_set_path, cutouts_path, plot=False):
 
+	COUNTERS = {
+		1.0 : 0,
+		2.0 : 0,
+		3.0 : 0
+	}
+
 	#Prep Image
 	fits_img = fits.open(img_path)
 	fits_img = make_fits_2D(fits_img[0])
@@ -171,7 +177,7 @@ def newDivideImages(img_path, training_set_path, cutouts_path, plot=False):
 				prefix_index = img_path.find('B')
 				prefix = img_path[prefix_index:prefix_index+2]
 				filename = f'{prefix}img-{i}-{j}.png'
-				img_array = power(img_array, power_index=1.2, scale_min=0.0)
+				#img_array = power(img_array, power_index=1.2, scale_min=0.0)
 				plt.imsave(cutouts_path + filename, img_array, cmap='gist_heat', origin='lower')
 				if plot:
 					_, ax = plt.subplots()
@@ -196,6 +202,8 @@ def newDivideImages(img_path, training_set_path, cutouts_path, plot=False):
 					xmax = min(xmax, IMG_SIZE-1)
 					ymax = min(ymax, IMG_SIZE-1)
 
+					COUNTERS[row.CLASS] += 1
+
 					training_data['img_path'].append(filename)
 					training_data['class'].append(row.CLASS - 1)
 					training_data['xmax'].append(xmax / IMG_SIZE)
@@ -213,6 +221,7 @@ def newDivideImages(img_path, training_set_path, cutouts_path, plot=False):
 	training_df.to_csv(cutouts_path + 'galaxies.csv', index=False)
 	print("GLOBAL = ", global_count)
 	print("FILTERED = ", filtered_count)
+	print("COUNTERS: ", COUNTERS)
 
 	return
 			

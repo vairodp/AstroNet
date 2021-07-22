@@ -96,7 +96,7 @@ class SKA(tfds.core.GeneratorBasedBuilder):
     #self._rename_paths(paths)
     #print(paths)
     newDivideImages(PATHS['B1_1000h'], PATHS['ANNOT_B1'], PATHS['CUTOUTS_B1'])
-    newDivideImages(PATHS['B2_1000h'], PATHS['ANNOT_B2'], PATHS['CUTOUTS_B2'])
+    #newDivideImages(PATHS['B2_1000h'], PATHS['ANNOT_B2'], PATHS['CUTOUTS_B2'])
     #newDivideImages(PATHS['B5_1000h'], PATHS['ANNOT_B5'], PATHS['CUTOUTS_B5'])
 
     return {

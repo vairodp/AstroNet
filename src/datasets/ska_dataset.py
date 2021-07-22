@@ -1,9 +1,11 @@
 import os
+from sklearn.utils import class_weight
 
 import tensorflow as tf
 import tensorflow_datasets as tfds
 import numpy as np
 from tensorflow.keras import backend
+from sklearn.utils.class_weight import compute_class_weight
 import math
 
 import datasets.ska
@@ -11,7 +13,8 @@ from configs.yolo_v4 import IMG_SIZE, BUFFER_SIZE, BATCH_SIZE, PREFETCH_SIZE
 from configs.yolo_v4 import MAX_NUM_BBOXES, ANCHORS, ANCHORS_MASKS, NUM_CLASSES
 
 SPLITS = {
-    'train': 'train[:80%]',
+    'train': 'train[:65%]',
+    'validation': 'train[65%:80%]',
     'test': 'train[-20%:]'
 }
 
@@ -24,9 +27,23 @@ class SKADataset:
         self.dataset = tfds.load('ska', split=SPLITS[mode], 
                                 shuffle_files=True, 
                                 data_dir=data_dir,
-                                download=False,
+                                #download=False,
                                 download_and_prepare_kwargs={'download_dir': download_dir})
+        #self.mean, self.std = self._get_mean_and_std()
     
+    def get_class_weights(self):
+        labels = self.dataset.flat_map(lambda x: tf.data.Dataset.from_tensor_slices(x['objects']['label']))
+        labels = list(labels.as_numpy_iterator())
+        label_weights = compute_class_weight(class_weight='balanced', classes=np.unique(labels), y=labels)
+        return label_weights
+    
+    def _get_mean_and_std(self):
+        images = self.dataset.flat_map(lambda x: tf.data.Dataset.from_tensor_slices(x['image']))
+        images = list(images.as_numpy_iterator())
+        mean = np.mean(images)
+        std = np.std(images)
+        return mean, std
+
     def transform_bbox(self, bbox):
         # bbox = [ymin, xmin, ymax, xmax] ---> [x, y, width, height]
         ymin = bbox[..., 0]
@@ -114,6 +131,7 @@ class SKADataset:
         # normalize to [-1, 1]
         image = tf.cast(image, tf.float32)
         image = image / 127.5 - 1.0
+        #image = (image / self.mean) - self.std
 
         bbox = self.concat_class(bbox, label)
         bbox = self.pad_bbox(bbox)

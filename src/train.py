@@ -1,40 +1,74 @@
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
+
+import numpy as np
+
 import datasets
 import tensorflow as tf
 from yolo_v4 import YoloV4
 from loss import YoloLoss
 from datasets.ska_dataset import SKADataset
-from configs.yolo_v4 import NUM_CLASSES, loss_params
+from configs.yolo_v4 import ANCHORS, ANCHORS_MASKS, NUM_CLASSES, loss_params
 
 #Loading Bar
 from tqdm import tqdm
 
+checkpoint_filepath = '../checkpoints/model.{epoch:02d}-{loss:.2f}.h5'
+
+dataset_train = SKADataset(mode='train')
+class_weights = dataset_train.get_class_weights()
+dataset_train = dataset_train.get_dataset()
+
 yolo = YoloV4(num_classes=NUM_CLASSES)
-yolo.build((32, 128, 128, 3))
+yolo.build((None, 128, 128, 3))
 yolo.summary()
-optimizer = tf.keras.optimizers.Adam(learning_rate=0.003, clipnorm=1.0)
-yolo_loss = YoloLoss(iou_threshold=loss_params['iou_threshold'], use_ciou=True)
-#print(type(loss))
+optimizer = tf.keras.optimizers.Adam(learning_rate=0.003, clipvalue=1.0)
+loss_small = YoloLoss(anchors=ANCHORS[ANCHORS_MASKS[0]],
+                    class_weights=class_weights,
+                    iou_threshold=loss_params['iou_threshold'], 
+                    smooth_factor=loss_params['smooth_factor'], 
+                    use_ciou=True, reduction="sum")
+loss_med = YoloLoss(anchors=ANCHORS[ANCHORS_MASKS[1]],
+                    class_weights=class_weights,
+                    iou_threshold=loss_params['iou_threshold'], 
+                    smooth_factor=loss_params['smooth_factor'], 
+                    use_ciou=True, reduction="sum")
+loss_large = YoloLoss(anchors=ANCHORS[ANCHORS_MASKS[2]],
+                    class_weights=class_weights,
+                    iou_threshold=loss_params['iou_threshold'], 
+                    smooth_factor=loss_params['smooth_factor'], 
+                    use_ciou=True, reduction="sum")
 
-dataset = SKADataset(mode='train').get_dataset()
+model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
+    filepath=checkpoint_filepath,
+    save_weights_only=True,
+    monitor='loss',
+    mode='min',
+    save_best_only=True)
 
-#yolo.compile(optimizer=optimizer, loss=yolo_loss)
+val_data = SKADataset(mode='validation').get_dataset()
 
-def train_one_step(x, y):
-    with tf.GradientTape() as tape:
-        pred = yolo(x, training=True)
-        pred_loss = yolo_loss(y_pred=pred, y_true=y)
-        regularization_loss = tf.reduce_sum(yolo.losses)
-        total_loss = pred_loss + regularization_loss
+yolo.compile(optimizer=optimizer, 
+            loss=[loss_small, loss_med, loss_large], 
+            run_eagerly=True)
+#yolo.load_weights(filepath='../checkpoints/model.02-0.68.h5')
+yolo.fit(dataset_train, epochs=60, callbacks=[model_checkpoint_callback], validation_data=val_data)
 
-    grads = tape.gradient(total_loss, yolo.trainable_variables)
-    optimizer.apply_gradients(
-        zip(grads, yolo.trainable_variables))
+#def train_one_step(x, y):
+#    with tf.GradientTape() as tape:
+#        pred = yolo(x, training=True)
+#        pred_loss = yolo_loss(y_pred=pred, y_true=y)
+#        regularization_loss = tf.reduce_sum(yolo.losses)
+#       total_loss = pred_loss + regularization_loss
 
-    return pred_loss
+#    grads = tape.gradient(total_loss, yolo.trainable_variables)
+#    optimizer.apply_gradients(
+#        zip(grads, yolo.trainable_variables))
 
-for epoch in tqdm(range(100), desc='Training epochs..'):
-    for data in dataset:
-        print(len(data['image']))
-        loss = train_one_step(data['image'], data['label'])
-        tf.print(loss)
+#    return pred_loss
 
+#for epoch in tqdm(range(15), desc='Training epochs..'):
+#    for data in dataset:
+#        print(len(data['image']))
+#        loss = train_one_step(data['image'], data['label'])
+#        tf.print(loss)

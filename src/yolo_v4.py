@@ -285,7 +285,6 @@ class Head(Layer):
         
         return output_small, output_medium, output_large
 
-
 class YoloV4(tf.keras.Model):
     def __init__(self, num_classes, shape=(128, 128, 3), backbone=cspdarknet53, neck=panet, head=head):
         super().__init__()
@@ -294,6 +293,44 @@ class YoloV4(tf.keras.Model):
         self.backbone = self._get_backbone(backbone)
         self.neck = Neck(neck)
         self.head = Head(head)
+    
+    def train_step(self, data):
+        # Unpack the data. Its structure depends on your model and
+        # on what you pass to `fit()`.
+        x, y = data['image'], list(data['label'])
+
+        with tf.GradientTape() as tape:
+            y_pred = self(x, training=True)  # Forward pass
+            # Compute the loss value
+            # (the loss function is configured in `compile()`)
+            loss = self.compiled_loss(y, y_pred, regularization_losses=self.losses)
+            #loss = tf.reduce_sum(loss)
+            #regularization_loss = tf.reduce_sum(self.losses)
+            #total_loss = loss + regularization_loss
+
+        # Compute gradients
+        trainable_vars = self.trainable_variables
+        gradients = tape.gradient(loss, trainable_vars)
+        # Update weights
+        self.optimizer.apply_gradients(zip(gradients, trainable_vars))
+        # Update metrics (includes the metric that tracks the loss)
+        self.compiled_metrics.update_state(y, y_pred)
+        # Return a dict mapping metric names to current value
+        return {m.name: m.result() for m in self.metrics}
+    
+    def test_step(self, data):
+        # Unpack the data
+        x, y = data['image'], list(data['label'])
+
+        # Compute predictions
+        y_pred = self(x, training=False)
+        # Updates the metrics tracking the loss
+        self.compiled_loss(y, y_pred, regularization_losses=self.losses)
+        # Update the metrics.
+        self.compiled_metrics.update_state(y, y_pred)
+        # Return a dict mapping metric names to current value.
+        # Note that it will include the loss (tracked in self.metrics).
+        return {m.name: m.result() for m in self.metrics}
     
     def _get_backbone(self, config):
         in_filters = self.img_shape[2]

@@ -1,14 +1,17 @@
 import numpy as np
 
 import tensorflow as tf
-from tensorflow.keras.losses import Loss, binary_crossentropy
+from tensorflow.keras import backend
+from tensorflow.keras.losses import Loss, binary_crossentropy, categorical_crossentropy
 
 from configs.yolo_v4 import ANCHORS, ANCHORS_MASKS, NUM_CLASSES, loss_params
 
 
 class YoloLoss(Loss):
     def __init__(self, 
+                anchors,
                 iou_threshold,
+                class_weights=None,
                 smooth_factor=0.0, 
                 use_giou=False, 
                 use_ciou=False, 
@@ -20,13 +23,30 @@ class YoloLoss(Loss):
         self.use_giou = use_giou
         self.use_ciou = use_ciou
         self.use_diou = use_diou
-        self.anchors = ANCHORS
-        self.anchors_masks = ANCHORS_MASKS
+        #self.anchors = ANCHORS
+        #self.anchors_masks = ANCHORS_MASKS
+        self.valid_anchors = anchors
+        self.class_weights = class_weights
+
+    
+    def weighted_cetegorical_crossentropy(self, class_true, class_pred):
+        if self.class_weights is not None:
+            weights = backend.variable(self.class_weights)
+            # scale predictions so that the class probas of each sample sum to 1
+            class_pred = tf.math.divide_no_nan(class_pred, backend.sum(class_pred, axis=-1, keepdims=True))
+            # clip to prevent NaN's and Inf's
+            class_pred = backend.clip(class_pred, backend.epsilon(), 1 - backend.epsilon())
+            # calc
+            loss = class_true * backend.log(class_pred) * weights
+            loss = -backend.sum(loss, -1)
+        else:
+            loss = categorical_crossentropy(class_true, class_pred)
+        return loss
 
     def label_smoothing(self, true_labels):
         return true_labels * (1.0 - self.smooth_factor) + self.smooth_factor / NUM_CLASSES
         
-    def interpret_prediction_boxes(self, pred, anchors):
+    def interpret_prediction_boxes(self, pred):
         grid_size = tf.shape(pred)[1]
         box_xy, box_wh, objectness, probs = tf.split(pred, (2, 2, 1, -1), axis=-1)
 
@@ -39,7 +59,7 @@ class YoloLoss(Loss):
         grid = tf.expand_dims(tf.stack(grid, axis=-1), axis=2)
 
         box_xy = (box_xy + tf.cast(grid, tf.float32)) / tf.cast(grid_size, tf.float32)
-        box_wh = tf.exp(box_wh) * anchors
+        box_wh = tf.exp(box_wh) * self.valid_anchors
 
         box_x1y1 = box_xy - box_wh / 2
         box_x2y2 = box_xy + box_wh / 2
@@ -55,7 +75,7 @@ class YoloLoss(Loss):
         
         return true_xy, true_wh, true_obj, true_class
 
-    def interpret_true_boxes(self, y_true, anchors):
+    def interpret_true_boxes(self, y_true):
         grid_size = tf.shape(y_true)[1]
         grid = tf.meshgrid(tf.range(grid_size), tf.range(grid_size))
         grid = tf.expand_dims(tf.stack(grid, axis=-1), axis=2)
@@ -63,7 +83,7 @@ class YoloLoss(Loss):
         true_xy, true_wh, _, _ = self.get_true_scores(y_true)
         true_xy = true_xy * tf.cast(grid_size, tf.float32) - \
                       tf.cast(grid, tf.float32)
-        true_wh = tf.math.log(true_wh / anchors)
+        true_wh = tf.math.log(true_wh / self.valid_anchors)
         true_wh = tf.where(tf.math.is_inf(true_wh),
                                tf.zeros_like(true_wh), true_wh)
 
@@ -157,8 +177,8 @@ class YoloLoss(Loss):
         # https://www.analyticsvidhya.com/blog/2020/08/a-beginners-guide-to-focal-loss-in-object-detection/
         pass
 
-    def compute_loss(self, y_true, y_pred, anchors):
-        box_pred, obj_pred, class_pred, raw_box_pred = self.interpret_prediction_boxes(y_pred, anchors)
+    def compute_loss(self, y_true, y_pred):
+        box_pred, obj_pred, class_pred, raw_box_pred = self.interpret_prediction_boxes(y_pred)
 
         xy_true, wh_true, obj_true, class_true = self.get_true_scores(y_true)
         box_true = tf.concat([xy_true - wh_true/2.0, xy_true + wh_true/2.0], axis=-1)
@@ -193,7 +213,7 @@ class YoloLoss(Loss):
             class_loss = self.focal_loss(true_class, pred_class)
         else:
         """
-        class_loss = obj_mask * binary_crossentropy(class_true, class_pred)
+        class_loss = obj_mask * self.weighted_cetegorical_crossentropy(class_true, class_pred)
 
         # box loss
         if self.use_giou:
@@ -214,7 +234,7 @@ class YoloLoss(Loss):
             pred_wh = raw_box_pred[..., 2:4]
 
             # invert box equation
-            true_xy, true_wh = self.interpret_true_boxes(y_true, anchors)
+            true_xy, true_wh = self.interpret_true_boxes(y_true)
 
             # sum squared box loss
             xy_loss = obj_mask * weights * \
@@ -233,16 +253,20 @@ class YoloLoss(Loss):
         return box_loss + confidence_loss + class_loss
 
     def call(self, y_true, y_pred):
-        true_small, true_med, true_large = y_true
-        pred_small, pred_med, pred_large = y_pred
+        #true_small, true_med, true_large = y_true
+        #pred_small, pred_med, pred_large = y_pred
 
         # Small bbox loss
-        loss_small = self.compute_loss(true_small, pred_small, self.anchors[self.anchors_masks[0]])
+        #loss_small = self.compute_loss(true_small, pred_small, self.anchors[self.anchors_masks[0]])
 
         # Medium bbox loss
-        loss_med = self.compute_loss(true_med, pred_med, self.anchors[self.anchors_masks[1]])
+        #loss_med = self.compute_loss(true_med, pred_med, self.anchors[self.anchors_masks[1]])
         
         # Large bbox loss
-        loss_large = self.compute_loss(true_large, pred_large, self.anchors[self.anchors_masks[2]])
+        #loss_large = self.compute_loss(true_large, pred_large, self.anchors[self.anchors_masks[2]])
 
-        return tf.reduce_sum(loss_small + loss_med + loss_large)
+        #return tf.reduce_sum(loss_small + loss_med + loss_large)
+
+        loss = self.compute_loss(y_true, y_pred)
+
+        return loss
