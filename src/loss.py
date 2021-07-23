@@ -94,11 +94,13 @@ class YoloLoss(Loss):
                            tf.maximum(box_true[..., 0], box_pred[..., 0]), 0)
         height = tf.maximum(tf.minimum(box_true[..., 3], box_pred[..., 3]) -
                            tf.maximum(box_true[..., 1], box_pred[..., 1]), 0)
+                                                   
         area = width * height
         box_true_area = (box_true[..., 2] - box_true[..., 0]) * \
                      (box_true[..., 3] - box_true[..., 1])
         box_pred_area = (box_pred[..., 2] - box_pred[..., 0]) * \
                      (box_pred[..., 3] - box_pred[..., 1])
+
 
         area_union = box_true_area + box_pred_area - area
         iou = tf.math.divide_no_nan(area, area_union)
@@ -153,7 +155,7 @@ class YoloLoss(Loss):
 
         d = tf.square(box_true_center_x - box_pred_center_x) + tf.square(box_true_center_y - box_pred_center_y)
 
-        diou = 1.0 - iou + tf.math.divide_no_nan(d, c2)
+        diou = iou + tf.math.divide_no_nan(d, c2)
 
         return diou
 

@@ -321,7 +321,6 @@ class YoloV4(tf.keras.Model):
     def test_step(self, data):
         # Unpack the data
         x, y = data['image'], list(data['label'])
-
         # Compute predictions
         y_pred = self(x, training=False)
         # Updates the metrics tracking the loss

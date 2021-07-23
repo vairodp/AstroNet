@@ -19,6 +19,7 @@ dataset_train = SKADataset(mode='train')
 class_weights = dataset_train.get_class_weights()
 dataset_train = dataset_train.get_dataset()
 
+class_weights = None
 yolo = YoloV4(num_classes=NUM_CLASSES)
 yolo.build((None, 128, 128, 3))
 yolo.summary()
@@ -57,9 +58,10 @@ yolo.fit(dataset_train, epochs=60, callbacks=[model_checkpoint_callback], valida
 #def train_one_step(x, y):
 #    with tf.GradientTape() as tape:
 #        pred = yolo(x, training=True)
-#        pred_loss = yolo_loss(y_pred=pred, y_true=y)
-#        regularization_loss = tf.reduce_sum(yolo.losses)
-#       total_loss = pred_loss + regularization_loss
+#        true_s, true_m, true_l = y
+#        pred_s, pred_m, pred_l = pred
+#        loss_s = loss_large(y_pred=pred_l, y_true=true_l)
+#        tf.print("GLOBAL LOSS: ", loss_s)
 
 #    grads = tape.gradient(total_loss, yolo.trainable_variables)
 #    optimizer.apply_gradients(
@@ -67,8 +69,10 @@ yolo.fit(dataset_train, epochs=60, callbacks=[model_checkpoint_callback], valida
 
 #    return pred_loss
 
-#for epoch in tqdm(range(15), desc='Training epochs..'):
-#    for data in dataset:
+#for epoch in tqdm(range(1), desc='Training epochs..'):
+#    for data in dataset_train:
 #        print(len(data['image']))
-#        loss = train_one_step(data['image'], data['label'])
+#        train_one_step(data['image'], data['label'])
+#        break
+
 #        tf.print(loss)

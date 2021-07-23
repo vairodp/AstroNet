@@ -13,8 +13,8 @@ from configs.yolo_v4 import IMG_SIZE, BUFFER_SIZE, BATCH_SIZE, PREFETCH_SIZE
 from configs.yolo_v4 import MAX_NUM_BBOXES, ANCHORS, ANCHORS_MASKS, NUM_CLASSES
 
 SPLITS = {
-    'train': 'train[:65%]',
-    'validation': 'train[65%:80%]',
+    'train': 'train[:70%]',
+    'validation': 'train[70%:80%]',
     'test': 'train[-20%:]'
 }
 
@@ -72,7 +72,7 @@ class SKADataset:
         intersection = np.minimum(box_wh[..., 0], ANCHORS[..., 0]) * np.minimum(box_wh[..., 1],
                                                                                      ANCHORS[..., 1])
         iou = intersection / (box_area + anchor_area - intersection)
-        anchor_idx = np.argmax(iou, axis=-1)  # shape = (1, n)
+        anchor_idx = np.argmax(iou, axis=-1).reshape((-1))  # shape = (1, n) --> (n,)
 
         label_small = self.yolo_label(bbox, label, ANCHORS_MASKS[0], anchor_idx, grid_size)
         label_medium = self.yolo_label(bbox, label, ANCHORS_MASKS[1], anchor_idx, grid_size * 2)
@@ -81,7 +81,6 @@ class SKADataset:
         return label_small, label_medium, label_large
 
     def yolo_label(self, bbox, label, anchor_masks, anchor_idx, grid_size):
-        
         # grids.shape: (grid_size, grid_size, 3, NUMCLASSES + 5)
         grids = np.zeros((grid_size, grid_size, anchor_masks.shape[0], (5 + NUM_CLASSES)), dtype=np.float32)
 
@@ -107,7 +106,7 @@ class SKADataset:
     def get_dataset(self):
         data = self.dataset.map(self.map_features) \
             .shuffle(BUFFER_SIZE) \
-            .batch(BATCH_SIZE) \
+            .batch(BATCH_SIZE, drop_remainder=True) \
             .prefetch(PREFETCH_SIZE)
 
         return data

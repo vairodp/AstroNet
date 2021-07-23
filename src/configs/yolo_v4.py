@@ -20,7 +20,7 @@ ANCHORS = np.array([(12,16),  (19,36),  (40,28),  (36,75),  (76,55),
 
 ANCHORS_MASKS =  np.array([[6, 7, 8], [3, 4, 5], [0, 1, 2]])
 
-BATCH_SIZE = 8
+BATCH_SIZE = 32
 BUFFER_SIZE = 100
 PREFETCH_SIZE = 2
 MAX_NUM_BBOXES = 300
@@ -94,6 +94,6 @@ head = [
 
 loss_params = {
     'sensitivity_factor': 1.1,
-    'iou_threshold': 0.45,
+    'iou_threshold': 0.55,
     'smooth_factor': 0.1
 }
