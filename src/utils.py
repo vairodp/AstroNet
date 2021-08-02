@@ -69,3 +69,14 @@ def flatten_output(outputs):
     class_probs = tf.reshape(class_probs, (tf.shape(class_probs)[0], -1, tf.shape(class_probs)[-1]))
 
     return bbox, objectness, class_probs
+
+
+def draw_outputs(img, boxes, objectness, classes, nums):
+    boxes, objectness, classes, nums = boxes[0], objectness[0], classes[0], nums[0]
+    boxes=np.array(boxes)
+    for i in range(nums):
+        x1y1 = tuple((boxes[i,0:2] * [img.shape[1],img.shape[0]]).astype(np.int32))
+        x2y2 = tuple((boxes[i,2:4] * [img.shape[1],img.shape[0]]).astype(np.int32))
+        img = cv2.rectangle(img, (x1y1), (x2y2), (255,0,0), 2)
+    
+    return img
