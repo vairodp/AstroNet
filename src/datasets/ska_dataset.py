@@ -1,5 +1,4 @@
 import os
-from sklearn.utils import class_weight
 
 import tensorflow as tf
 import tensorflow_datasets as tfds
@@ -13,9 +12,9 @@ from configs.yolo_v4 import IMG_SIZE, BUFFER_SIZE, BATCH_SIZE, PREFETCH_SIZE
 from configs.yolo_v4 import MAX_NUM_BBOXES, ANCHORS, ANCHORS_MASKS, NUM_CLASSES
 
 SPLITS = {
-    'train': 'train[:70%]',
-    'validation': 'train[70%:80%]',
-    'test': 'train[-20%:]'
+    'train': 'train[:80%]',
+    'validation': 'train[80%:90%]',
+    'test': 'train[-10%:]'
 }
 
 

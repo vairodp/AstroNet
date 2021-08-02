@@ -23,7 +23,9 @@ import matplotlib.patches as patches
 from tqdm import tqdm
 
 #Globals Values
-KAPPA = 0.5
+# b1: KAPPA = 2, no power
+# b2: KAPPA = 2, power=1.2
+KAPPA = 2
 
 def showImage():
 	img = mpimg.imread('/data/imageResult1.png')
@@ -35,8 +37,8 @@ def get_boundaries(x, y):
 	min_y, max_y = y.min(), y.max()
 	minimum = min(min_x, min_y)
 	maximum = max(max_x, max_y)
-	minimum = (int(minimum / IMG_SIZE) - 1) * IMG_SIZE
-	maximum = (int(maximum / IMG_SIZE) + 1) * IMG_SIZE
+	minimum = (int(minimum / IMG_SIZE) + 1) * IMG_SIZE
+	maximum = (int(maximum / IMG_SIZE) - 1) * IMG_SIZE
 	return minimum, maximum
 
 '''
@@ -163,6 +165,7 @@ def newDivideImages(img_path, training_set_path, cutouts_path, plot=False):
 	filtered_count = 0
 
 	#sigma = np.std(fits_img[RANGE_MIN:RANGE_MAX, RANGE_MIN:RANGE_MAX])
+	
 	rms = np.sqrt(np.mean(fits_img[RANGE_MIN:RANGE_MAX, RANGE_MIN:RANGE_MAX] ** 2))
 
 	for i in tqdm(range(RANGE_MIN, RANGE_MAX, IMG_SIZE), desc='Preparing images...'):
@@ -177,7 +180,8 @@ def newDivideImages(img_path, training_set_path, cutouts_path, plot=False):
 				prefix_index = img_path.find('B')
 				prefix = img_path[prefix_index:prefix_index+2]
 				filename = f'{prefix}img-{i}-{j}.png'
-				#img_array = power(img_array, power_index=1.2, scale_min=0.0)
+				if 'B2' in img_path:
+					img_array = power(img_array, power_index=1.2, scale_min=0.0)
 				plt.imsave(cutouts_path + filename, img_array, cmap='gist_heat', origin='lower')
 				if plot:
 					_, ax = plt.subplots()
@@ -278,8 +282,8 @@ def train_test_split(filepath, test_size=0.20):
 	print(len(file_paths))
 """
 
-#newDivideImages(img_path='../data/raw/SKAMid_B5_1000h_v3.fits', 
-#				training_set_path='../data/raw/TrainingSet_B5_v2.txt',
-#				cutouts_path='../data/training/B5_1000h/', plot=True)
+#newDivideImages(img_path='../data/raw/SKAMid_B1_1000h_v3.fits', 
+#				training_set_path='../data/raw/TrainingSet_B1_v2.txt',
+#				cutouts_path='../data/training/B2_1000h/', plot=True)
 
 #train_test_split(filepath=CUTOUTS_PATH + 'galaxies_560Hz.csv')

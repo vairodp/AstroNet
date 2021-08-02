@@ -255,19 +255,6 @@ class YoloLoss(Loss):
         return box_loss + confidence_loss + class_loss
 
     def call(self, y_true, y_pred):
-        #true_small, true_med, true_large = y_true
-        #pred_small, pred_med, pred_large = y_pred
-
-        # Small bbox loss
-        #loss_small = self.compute_loss(true_small, pred_small, self.anchors[self.anchors_masks[0]])
-
-        # Medium bbox loss
-        #loss_med = self.compute_loss(true_med, pred_med, self.anchors[self.anchors_masks[1]])
-        
-        # Large bbox loss
-        #loss_large = self.compute_loss(true_large, pred_large, self.anchors[self.anchors_masks[2]])
-
-        #return tf.reduce_sum(loss_small + loss_med + loss_large)
 
         loss = self.compute_loss(y_true, y_pred)
 

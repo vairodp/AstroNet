@@ -96,7 +96,7 @@ class SKA(tfds.core.GeneratorBasedBuilder):
     #self._rename_paths(paths)
     #print(paths)
     newDivideImages(PATHS['B1_1000h'], PATHS['ANNOT_B1'], PATHS['CUTOUTS_B1'])
-    #newDivideImages(PATHS['B2_1000h'], PATHS['ANNOT_B2'], PATHS['CUTOUTS_B2'])
+    newDivideImages(PATHS['B2_1000h'], PATHS['ANNOT_B2'], PATHS['CUTOUTS_B2'])
     #newDivideImages(PATHS['B5_1000h'], PATHS['ANNOT_B5'], PATHS['CUTOUTS_B5'])
 
     return {
@@ -117,7 +117,6 @@ class SKA(tfds.core.GeneratorBasedBuilder):
     for folder in folders:
       folder_path = path / folder
       print(folder_path._path_str)
-      # TODO(ska_dataset): Yields (key, example) tuples from the dataset
       for img_path in folder_path.glob('*.png'):
         yield img_path.name, {
             'image': img_path,
