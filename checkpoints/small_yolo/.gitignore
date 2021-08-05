@@ -1,0 +1,3 @@
+# Use this directory only for storing the checkpoints for small_yolo
+*
+!.gitignore
