@@ -1,0 +1,21 @@
+{
+  "citation": "@misc{bonaldi2018square,\n      title={Square Kilometre Array Science Data Challenge 1},\n      author={Anna Bonaldi and Robert Braun},\n      year={2018},\n      eprint={1811.10454},\n      archivePrefix={arXiv},\n      primaryClass={astro-ph.IM}\n}",
+  "description": "Description is **formatted** as markdown.\n\nIt should also contain any processing which has been applied (if any),\n(e.g. corrupted example skipped, images cropped,...):",
+  "location": {
+    "urls": [
+      "https://astronomers.skatelescope.org/ska-science-data-challenge-1/"
+    ]
+  },
+  "moduleName": "datasets.ska.ska",
+  "name": "ska",
+  "splits": [
+    {
+      "name": "train",
+      "numBytes": "10639908",
+      "shardLengths": [
+        "1251"
+      ]
+    }
+  ],
+  "version": "1.0.0"
+}
