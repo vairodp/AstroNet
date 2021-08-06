@@ -2,7 +2,7 @@ import numpy as np
 import tensorflow as tf
 import cv2
 
-from configs.yolo_v4 import ANCHORS, ANCHORS_MASKS, loss_params, SCORE_THRESHOLD, MAX_NUM_BBOXES
+from configs.train_config import loss_params, SCORE_THRESHOLD, MAX_NUM_BBOXES
 
 def non_sim(inputs):
     
@@ -11,8 +11,7 @@ def non_sim(inputs):
     max_output_size_per_class = MAX_NUM_BBOXES
     iou_threshold = loss_params['iou_threshold']
     confidence_threshold = SCORE_THRESHOLD
-                            
-                            
+                   
                             
     bbox, confs, class_probs = tf.split(inputs, [4, 1, -1], axis=-1)
     bbox=bbox/model_size[0]
@@ -29,11 +28,7 @@ def non_sim(inputs):
     )
     return boxes, scores, classes, valid_detections
 
-
-
-def non_max_suppression(inputs):
-    anchors = ANCHORS
-    anchor_masks = ANCHORS_MASKS
+def non_max_suppression(inputs, anchors, anchor_masks):
     iou_threshold = loss_params['iou_threshold']
     score_threshold = SCORE_THRESHOLD
     max_bbox_size = MAX_NUM_BBOXES
@@ -104,8 +99,8 @@ def draw_outputs(img, boxes, objectness, classes, nums):
     boxes, objectness, classes, nums = boxes[0], objectness[0], classes[0], nums[0]
     boxes=np.array(boxes)
     for i in range(nums):
-        x1y1 = tuple((boxes[i,0:2] * 255).astype(np.int32))
-        x2y2 = tuple((boxes[i,2:4] * 255).astype(np.int32))
+        x1y1 = tuple((boxes[i,0:2] * 128).astype(np.int32))
+        x2y2 = tuple((boxes[i,2:4] * 128).astype(np.int32))
         
         print(x1y1)
         print(x2y2)
