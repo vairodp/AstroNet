@@ -1,0 +1,43 @@
+{
+    "type": "tensorflow_datasets.core.features.features_dict.FeaturesDict",
+    "content": {
+        "image": {
+            "type": "tensorflow_datasets.core.features.image_feature.Image",
+            "content": {
+                "shape": [
+                    128,
+                    128,
+                    3
+                ],
+                "dtype": "uint8",
+                "encoding_format": null,
+                "use_colormap": false
+            }
+        },
+        "image/filename": {
+            "type": "tensorflow_datasets.core.features.text_feature.Text",
+            "content": {}
+        },
+        "objects": {
+            "type": "tensorflow_datasets.core.features.sequence_feature.Sequence",
+            "content": {
+                "feature": {
+                    "type": "tensorflow_datasets.core.features.features_dict.FeaturesDict",
+                    "content": {
+                        "bbox": {
+                            "type": "tensorflow_datasets.core.features.bounding_boxes.BBoxFeature",
+                            "content": {}
+                        },
+                        "label": {
+                            "type": "tensorflow_datasets.core.features.class_label_feature.ClassLabel",
+                            "content": {
+                                "num_classes": 3
+                            }
+                        }
+                    }
+                },
+                "length": null
+            }
+        }
+    }
+}
