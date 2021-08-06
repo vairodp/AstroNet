@@ -5,7 +5,7 @@ import json
 import pandas as pd
 import tensorflow_datasets as tfds
 
-from configs.yolo_v4 import IMG_SIZE
+from configs.train_config import IMG_SIZE
 from data_prep import newDivideImages
 
 PATHS = {

@@ -8,7 +8,7 @@ from astropy.io import fits
 import astropy.wcs as pywcs
 from astropy.nddata.utils import Cutout2D
 from astropy.io.fits.verify import VerifyWarning
-from configs.yolo_v4 import IMG_SIZE
+from configs.train_config import IMG_SIZE
 
 #Suppressing Warnings
 import warnings 

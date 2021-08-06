@@ -8,8 +8,8 @@ from sklearn.utils.class_weight import compute_class_weight
 import math
 
 import datasets.ska
-from configs.yolo_v4 import IMG_SIZE, BUFFER_SIZE, BATCH_SIZE, PREFETCH_SIZE
-from configs.yolo_v4 import MAX_NUM_BBOXES, ANCHORS, ANCHORS_MASKS, NUM_CLASSES
+from configs.train_config import IMG_SIZE, BUFFER_SIZE, BATCH_SIZE, PREFETCH_SIZE
+from configs.train_config import MAX_NUM_BBOXES, NUM_CLASSES, get_anchors
 
 SPLITS = {
     'train': 'train[:80%]',
@@ -19,15 +19,18 @@ SPLITS = {
 
 
 class SKADataset:
-    def __init__(self, mode='train'):
+    def __init__(self, mode='train', grid_size=32, anchors=get_anchors()['anchors'], anchor_masks=get_anchors()['anchor_masks']):
         self.mode = mode
         data_dir = "../data"
         download_dir = data_dir + "/raw"
+        self.grid_size = grid_size
         self.dataset = tfds.load('ska', split=SPLITS[mode], 
                                 shuffle_files=True, 
                                 data_dir=data_dir,
                                 #download=False,
                                 download_and_prepare_kwargs={'download_dir': download_dir})
+        self.anchors=anchors
+        self.anchor_masks = anchor_masks
         #self.mean, self.std = self._get_mean_and_std()
     
     def get_class_weights(self):
@@ -61,21 +64,21 @@ class SKADataset:
         bbox = bbox / IMG_SIZE
         bbox = np.clip(bbox, a_min=0.0, a_max=1 - backend.epsilon())
 
-        grid_size = math.ceil(IMG_SIZE / 32)
+        grid_size = math.ceil(IMG_SIZE / self.grid_size)
         
         # find best anchor
-        anchor_area = ANCHORS[..., 0] * ANCHORS[..., 1]
+        anchor_area = self.anchors[..., 0] * self.anchors[..., 1]
         box_wh = bbox[..., 2:4]
-        box_wh = np.tile(np.expand_dims(box_wh, -2), (1, 1, ANCHORS.shape[0], 1))
+        box_wh = np.tile(np.expand_dims(box_wh, -2), (1, 1, self.anchors.shape[0], 1))
         box_area = box_wh[..., 0] * box_wh[..., 1]
-        intersection = np.minimum(box_wh[..., 0], ANCHORS[..., 0]) * np.minimum(box_wh[..., 1],
-                                                                                     ANCHORS[..., 1])
+        intersection = np.minimum(box_wh[..., 0], self.anchors[..., 0]) * np.minimum(box_wh[..., 1],
+                                                                                     self.anchors[..., 1])
         iou = intersection / (box_area + anchor_area - intersection)
         anchor_idx = np.argmax(iou, axis=-1).reshape((-1))  # shape = (1, n) --> (n,)
 
-        label_small = self.yolo_label(bbox, label, ANCHORS_MASKS[0], anchor_idx, grid_size)
-        label_medium = self.yolo_label(bbox, label, ANCHORS_MASKS[1], anchor_idx, grid_size * 2)
-        label_large = self.yolo_label(bbox, label, ANCHORS_MASKS[2], anchor_idx, grid_size * 4)
+        label_small = self.yolo_label(bbox, label, self.anchor_masks[0], anchor_idx, grid_size)
+        label_medium = self.yolo_label(bbox, label, self.anchor_masks[1], anchor_idx, grid_size * 2)
+        label_large = self.yolo_label(bbox, label, self.anchor_masks[2], anchor_idx, grid_size * 4)
 
         return label_small, label_medium, label_large
 
