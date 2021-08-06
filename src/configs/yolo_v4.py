@@ -9,26 +9,10 @@ List is structured by "B" indicating a residual block followed by the number of 
 "S" is for scale prediction block and computing the yolo loss
 "U" is for upsampling the feature map and concatenating with a previous layer
 """
-
-NUM_CLASSES = 3
-
-IMG_SIZE = 128
-
-#ANCHORS = np.array([(12,16),  (19,36),  (40,28),  (36,75),  (76,55),  
-#                    (72,146),  (142,110),  (192,243),  (459,401)],
-#                    np.float32) / IMG_SIZE
-
-ANCHORS = np.array([(0.12,0.23), (0.16,0.11), (0.22,0.21), (0.24,0.40), 
-(0.41,0.25), (0.44,0.73), (0.77,0.42), (1.20,1.07), (2.90,2.86)])
-
-ANCHORS_MASKS =  np.array([[6, 7, 8], [3, 4, 5], [0, 1, 2]])
-
-SCORE_THRESHOLD = 0.5
-
-BATCH_SIZE = 8
-BUFFER_SIZE = 100
-PREFETCH_SIZE = 2
-MAX_NUM_BBOXES = 300
+anchor_dict = {
+    'anchors': np.array([(0.12,0.23), (0.16,0.11), (0.22,0.21), (0.24,0.40), (0.41,0.25), (0.44,0.73), (0.77,0.42), (1.20,1.07), (2.90,2.86)]),
+    'anchor_masks':  np.array([[6, 7, 8], [3, 4, 5], [0, 1, 2]])
+}
 
 #Backbone
 cspdarknet53 = [
@@ -74,33 +58,6 @@ panet = [
     ['A', 3]
 ]
 
-panet1 = [
-    'S', # output small
-    (512, 1, 1, 'same', 'leaky'),
-    (1024, 3, 1, 'same', 'leaky'),
-    (512, 1, 1, 'same', 'leaky'),
-    ["SPP"],
-    (512, 1, 1, 'same', 'leaky'),
-    (1024, 3, 1, 'same', 'leaky'),
-    (512, 1, 1, 'same', 'leaky'),
-    ["U", 256],
-    'M', # output medium
-    ["C", 256, 1, 1, 'same', 'leaky'],
-    (256, 1, 1, 'same', 'mish'),
-    (512, 3, 1, 'same', 'mish'),
-    (256, 1, 1, 'same', 'mish'),
-    (512, 3, 1, 'same', 'mish'),
-    (256, 1, 1, 'same', 'mish'),
-    ["U", 128],
-    'L', # output large
-    ["C", 128, 1, 1, 'same', 'leaky'],
-    (128, 1, 1, 'same', 'leaky'),
-    (256, 3, 1, 'same', 'mish'),
-    (128, 1, 1, 'same', 'leaky'),
-    (256, 3, 1, 'same', 'mish'),
-    (128, 1, 1, 'same', 'leaky'),
-    ['A', 3]
-]
 
 head = [
     'L',
@@ -124,9 +81,3 @@ head = [
     (512, 1, 1, 'same', 'leaky'),
     ["S", 512],# output_3
 ]
-
-loss_params = {
-    'sensitivity_factor': 1.1,
-    'iou_threshold': 0.55,
-    'smooth_factor': 0.1
-}

@@ -4,7 +4,7 @@ import tensorflow as tf
 from tensorflow.keras import backend
 from tensorflow.keras.losses import Loss, binary_crossentropy, categorical_crossentropy
 
-from configs.yolo_v4 import ANCHORS, ANCHORS_MASKS, NUM_CLASSES, loss_params
+from configs.train_config import NUM_CLASSES, loss_params
 
 
 class YoloLoss(Loss):
@@ -23,11 +23,8 @@ class YoloLoss(Loss):
         self.use_giou = use_giou
         self.use_ciou = use_ciou
         self.use_diou = use_diou
-        #self.anchors = ANCHORS
-        #self.anchors_masks = ANCHORS_MASKS
         self.valid_anchors = anchors
         self.class_weights = class_weights
-
     
     def weighted_cetegorical_crossentropy(self, class_true, class_pred):
         if self.class_weights is not None:
