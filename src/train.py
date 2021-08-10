@@ -76,5 +76,5 @@ yolo.compile(optimizer=optimizer,
 #yolo = load_darknet_weights_in_yolo(yolo, trainable=True)
 #yolo.summary()
 
-yolo.fit(dataset_train, epochs=60, callbacks=[model_checkpoint_callback, tensorboard_callback, reduce_on_plateau, telegram_callback], 
+yolo.fit(dataset_train, epochs=250, callbacks=[model_checkpoint_callback, tensorboard_callback, reduce_on_plateau, telegram_callback], 
         validation_data=val_data)

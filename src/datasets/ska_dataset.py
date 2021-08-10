@@ -76,7 +76,6 @@ class SKADataset:
         iou = intersection / (box_area + anchor_area - intersection)
         
         anchor_idx = np.argmax(iou, axis=-1).reshape((-1))  # shape = (1, n) --> (n,)
-        print(anchor_idx)
 
         label_small = self.yolo_label(bbox, label, self.anchor_masks[0], anchor_idx, grid_size)
         label_medium = self.yolo_label(bbox, label, self.anchor_masks[1], anchor_idx, grid_size * 2)
