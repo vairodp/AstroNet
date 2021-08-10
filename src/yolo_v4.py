@@ -81,23 +81,23 @@ class Neck(tf.keras.Model):
         out_large, out_medium, out_small = x
         
         for layer in self.layer_list['S']:
-            out_small = layer(out_small)
-        small_upsampled = self.upsamplings['S'](out_small)
-        out_medium = self.concats['M'](out_medium)
+            out_small = layer(out_small, training=training)
+        small_upsampled = self.upsamplings['S'](out_small, training=training)
+        out_medium = self.concats['M'](out_medium, training=training)
         out_medium = self.concat([out_medium, small_upsampled])
         
         for layer in self.layer_list['M']:
-            out_medium = layer(out_medium)
-        medium_upsampled = self.upsamplings['M'](out_medium)
-        out_large = self.concats['L'](out_large)
+            out_medium = layer(out_medium, training=training)
+        medium_upsampled = self.upsamplings['M'](out_medium, training=training)
+        out_large = self.concats['L'](out_large, training=training)
         out_large = self.concat([out_large, medium_upsampled])
         
         for layer in self.layer_list['L']:
-            out_large = layer(out_large)
+            out_large = layer(out_large, training=training)
         
-        out_small = self.attentions[0](out_small)
-        out_medium = self.attentions[1](out_medium)
-        out_large = self.attentions[2](out_large)
+        out_small = self.attentions[0](out_small, training=training)
+        out_medium = self.attentions[1](out_medium, training=training)
+        out_large = self.attentions[2](out_large, training=training)
 
         return out_small, out_medium, out_large
 
@@ -147,23 +147,23 @@ class Head(tf.keras.Model):
 
         shortcut_large = output_large
 
-        output_large = self.layer_list['L'][0](output_large)
+        output_large = self.layer_list['L'][0](output_large, training=training)
 
-        large_downsampled = self.layer_list['L'][1](shortcut_large)
+        large_downsampled = self.layer_list['L'][1](shortcut_large, training=training)
         output_medium = self.concat([large_downsampled, output_medium])
 
         for layer in self.layer_list['M'][:-2]:
-            output_medium = layer(output_medium)
+            output_medium = layer(output_medium, training=training)
             
 
         shortcut_medium = output_medium
-        output_medium = self.layer_list['M'][-2](output_medium)
+        output_medium = self.layer_list['M'][-2](output_medium, training=training)
 
-        medium_downsampled = self.layer_list['M'][-1](shortcut_medium)
+        medium_downsampled = self.layer_list['M'][-1](shortcut_medium, training=training)
         output_small = self.concat([medium_downsampled, output_small])
 
         for layer in self.layer_list['S']:
-            output_small = layer(output_small)
+            output_small = layer(output_small, training=training)
         
         return output_small, output_medium, output_large
 
@@ -256,10 +256,10 @@ class YoloV4(tf.keras.Model):
         outputs_backbone = []
         for i, layer in enumerate(self.backbone):
             if i in [6, 8, 10]:
-                outputs_backbone.append(layer(x))
+                outputs_backbone.append(layer(x, training=training))
             x = layer(x)
-        x = self.neck(outputs_backbone)
-        x = self.head(x)
+        x = self.neck(outputs_backbone, training=training)
+        x = self.head(x, training=training)
         return x
     
     def predict_step(self, data):

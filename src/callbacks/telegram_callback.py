@@ -31,5 +31,11 @@ class TelegramCallback(tf.keras.callbacks.Callback):
             for chat_id in self.chat_ids:
                 requests.post(url=self.url,
                     data={'chat_id': chat_id, 'text': msg + '</pre>', 'parse_mode': 'HTML'})
+    
+    def on_train_end(self, logs):
+        msg = '<pre>' + 33*'=' + f"\nTraining ended for model {self.model.name}; total number of epochs: {len(logs['loss'])}\n" + 33*'=' + '</pre>'
+        for chat_id in self.chat_ids:
+            requests.post(url=self.url, 
+                data={'chat_id': chat_id, 'text':msg, 'parse_mode': 'HTML'})
         
        

@@ -1,6 +1,5 @@
 import os
 
-from tensorflow.keras import callbacks
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
 
 import numpy as np
@@ -78,4 +77,4 @@ yolo.compile(optimizer=optimizer,
 #yolo.summary()
 
 yolo.fit(dataset_train, epochs=60, callbacks=[model_checkpoint_callback, tensorboard_callback, reduce_on_plateau, telegram_callback], 
-        validation_data=val_data, steps_per_epoch=2)
+        validation_data=val_data)

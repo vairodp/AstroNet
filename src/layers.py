@@ -23,9 +23,11 @@ class CNNBlock(tf.keras.Model):
         super().__init__()
         self.padding = padding
         if self.padding != 'same':
-            self.conv = Conv2D(filters=num_filters, kernel_size=kernel_size, use_bias=not bn_act, **kwargs)
+            self.conv = Conv2D(filters=num_filters, kernel_size=kernel_size, use_bias=not bn_act, kernel_regularizer=tf.keras.regularizers.l2(0.0005),
+            kernel_initializer=tf.initializers.GlorotNormal(), **kwargs)
         else:
-            self.conv = Conv2D(filters=num_filters, kernel_size=kernel_size, use_bias=not bn_act, padding=self.padding, **kwargs)
+            self.conv = Conv2D(filters=num_filters, kernel_size=kernel_size, use_bias=not bn_act, padding=self.padding, kernel_regularizer=tf.keras.regularizers.l2(0.0005),
+            kernel_initializer=tf.initializers.GlorotNormal(),  **kwargs)
         self.bn = BatchNormalization()
         self.activation = ActivationFunction(activation).get_funct()
         self.use_bn_act = bn_act
@@ -42,12 +44,12 @@ class CNNBlock(tf.keras.Model):
 
     def call(self, x, training=False):
         if self.padding != 'same':
-            x = self.zero_padding(x)
-        x = self.conv(x)
+            x = self.zero_padding(x, training=training)
+        x = self.conv(x, training=training)
 
         if self.use_bn_act:
-            x = self.bn(x)
-            x = self.activation(x)
+            x = self.bn(x, training=training)
+            x = self.activation(x, training=training)
         return x
 
 class Mish(Layer):
@@ -87,9 +89,9 @@ class ResidualBlock(tf.keras.Model):
     def call(self, x, training=False):
         for layer in self.layer_list:
             if self.use_residual:
-                x = Add()([x,layer(x)])
+                x = Add()([x,layer(x, training=training)])
             else:
-                x = layer(x)
+                x = layer(x, training=training)
         return x
 
 class CSPBlock(tf.keras.Model):
@@ -121,9 +123,9 @@ class CSPBlock(tf.keras.Model):
         self.out_shape = out.shape
     
     def call(self, x, training=False):
-        x = self.downsampling(x)
-        part_1 = self.part_1(x)
-        part_2 = self.part_2(x)
+        x = self.downsampling(x, training=training)
+        part_1 = self.part_1(x, training=training)
+        part_2 = self.part_2(x, training=training)
 
         x = Concatenate()([part_1, part_2])
 
@@ -148,11 +150,11 @@ class SPPBlock(tf.keras.Model):
         self.out_shape = out.shape
     
     def call(self, x, training=False):
-        conv = self.conv(x)
+        conv = self.conv(x, training=training)
         max_poolings = [
-            self.maxpool_1(conv),
-            self.maxpool_2(conv),
-            self.maxpool_3(conv)
+            self.maxpool_1(conv, training=training),
+            self.maxpool_2(conv, training=training),
+            self.maxpool_3(conv, training=training)
         ]
         x = tf.concat([conv, *max_poolings], -1)
         return x
@@ -176,7 +178,7 @@ class UpSampling(tf.keras.Model):
         self.out_shape = out.shape
     
     def call(self, x, training=False):
-        return self.up_sampling(x)
+        return self.up_sampling(x, training=training)
 
 class SpatialAttention(tf.keras.Model):
     def __init__(self, input_shape, **kwargs):
@@ -193,7 +195,7 @@ class SpatialAttention(tf.keras.Model):
         self.out_shape = out.shape
     
     def call(self, x, training=False):
-        y = self.spatial_conv(x)
+        y = self.spatial_conv(x, training=training)
         return tf.multiply(x, y)
 
 class ScalePrediction(tf.keras.Model):
@@ -217,6 +219,6 @@ class ScalePrediction(tf.keras.Model):
         self.out_shape = out.shape
 
     def call(self, x, training=False):
-        x = self.pred(x)
-        x = self.reshape(x)
+        x = self.pred(x, training=training)
+        x = self.reshape(x, training=training)
         return x

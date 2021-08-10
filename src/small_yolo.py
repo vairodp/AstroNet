@@ -89,8 +89,8 @@ class SmallYolo(tf.keras.Model):
         outputs_backbone = []
         for i, layer in enumerate(self.backbone):
             if i in [2, 4, 6]:
-                outputs_backbone.append(layer(x))
-            x = layer(x)
+                outputs_backbone.append(layer(x, training=training))
+            x = layer(x, training=training)
         x = self.head(outputs_backbone[::-1])
         return x
     

@@ -1,5 +1,4 @@
 import numpy as np
-import tensorflow as tf
 
 """ 
 Information about architecture config:
@@ -10,8 +9,13 @@ List is structured by "B" indicating a residual block followed by the number of 
 "U" is for upsampling the feature map and concatenating with a previous layer
 """
 
+#anchor_dict = {
+#    'anchors': np.array([(0.47,0.48), (0.53,1.05), (0.92,0.89), (0.97,0.53), (1.09,1.81), (2.05,1.15), (2.60,3.01), (5.93,4.51), (12.06,12.36)]),
+#    'anchor_masks':  np.array([[6, 7, 8], [3, 4, 5], [0, 1, 2]]),
+#}
+
 anchor_dict = {
-    'anchors': np.array([(0.47,0.48), (0.53,1.05), (0.92,0.89), (0.97,0.53), (1.09,1.81), (2.05,1.15), (2.60,3.01), (5.93,4.51), (12.06,12.36)]),
+    'anchors': np.array([(0.03,0.06), (0.04,0.03), (0.06,0.05), (0.06,0.10), (0.11,0.18), (0.11,0.07), (0.24,0.14), (0.34,0.36), (0.81,0.77)]),
     'anchor_masks':  np.array([[6, 7, 8], [3, 4, 5], [0, 1, 2]]),
 }
 
@@ -22,7 +26,7 @@ backbone = [
     (64, 3, 1, 'same', 'mish'),
     ["CSP", 2],
     (128, 1, 1, 'same', 'mish'),
-    ["CSP", 8],
+    ["CSP", 4],
     (256, 1, 1, 'same', 'mish')
 ]
 
