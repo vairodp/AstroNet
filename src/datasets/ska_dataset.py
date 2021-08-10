@@ -61,20 +61,22 @@ class SKADataset:
     
     def map_label(self, bbox, label):
         # bbox = [x, y, width, height] values in [0, IMG_SIZE]
-        bbox = bbox / IMG_SIZE
         bbox = np.clip(bbox, a_min=0.0, a_max=1 - backend.epsilon())
 
         grid_size = math.ceil(IMG_SIZE / self.grid_size)
         
         # find best anchor
         anchor_area = self.anchors[..., 0] * self.anchors[..., 1]
+
         box_wh = bbox[..., 2:4]
         box_wh = np.tile(np.expand_dims(box_wh, -2), (1, 1, self.anchors.shape[0], 1))
         box_area = box_wh[..., 0] * box_wh[..., 1]
         intersection = np.minimum(box_wh[..., 0], self.anchors[..., 0]) * np.minimum(box_wh[..., 1],
                                                                                      self.anchors[..., 1])
         iou = intersection / (box_area + anchor_area - intersection)
+        
         anchor_idx = np.argmax(iou, axis=-1).reshape((-1))  # shape = (1, n) --> (n,)
+        print(anchor_idx)
 
         label_small = self.yolo_label(bbox, label, self.anchor_masks[0], anchor_idx, grid_size)
         label_medium = self.yolo_label(bbox, label, self.anchor_masks[1], anchor_idx, grid_size * 2)
