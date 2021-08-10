@@ -43,9 +43,9 @@ def write_anchors_to_file(centroids,X,anchor_file, grid_size):
     anchors = centroids.copy()
     print(anchors.shape)
 
-    for i in range(anchors.shape[0]):
-        anchors[i][0]*=width_in_cfg_file/grid_size
-        anchors[i][1]*=height_in_cfg_file/grid_size
+    #for i in range(anchors.shape[0]):
+    #    anchors[i][0]*=width_in_cfg_file/grid_size
+    #    anchors[i][1]*=height_in_cfg_file/grid_size
          
 
     widths = anchors[:,0]
@@ -137,14 +137,14 @@ def main(argv):
     
     if args.num_clusters == 0:
         for num_clusters in range(1,11): #we make 1 through 10 clusters 
-            anchor_file = join(args.output_dir,'anchors{}-{}.txt'.format(num_clusters, args.grid_size))
+            anchor_file = join(args.output_dir,'anchors_trial{}-{}.txt'.format(num_clusters, args.grid_size))
 
             indices = [random.randrange(annotation_dims.shape[0]) for _ in range(num_clusters)]
             centroids = annotation_dims[indices]
             kmeans(annotation_dims,centroids,anchor_file, args.grid_size)
             print('centroids.shape', centroids.shape)
     else:
-        anchor_file = join(args.output_dir,'anchors{}-{}.txt'.format(args.num_clusters, args.grid_size))
+        anchor_file = join(args.output_dir,'anchors_trial{}-{}.txt'.format(args.num_clusters, args.grid_size))
         indices = [ random.randrange(annotation_dims.shape[0]) for _ in range(args.num_clusters)]
         centroids = annotation_dims[indices]
         kmeans(annotation_dims,centroids,anchor_file, args.grid_size)
