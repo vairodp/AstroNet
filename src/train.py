@@ -63,7 +63,7 @@ tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir='../log')
 
 telegram_callback = TelegramCallback()
 
-warmup_steps = int(0.20 * NUM_EPOCHS)
+warmup_steps = int(0.20 * NUM_EPOCHS) * 62
 
 max_decay_steps = NUM_EPOCHS * 62 - warmup_steps
 
