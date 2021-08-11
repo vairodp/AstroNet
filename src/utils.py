@@ -4,30 +4,6 @@ import cv2
 
 from configs.train_config import loss_params, SCORE_THRESHOLD, MAX_NUM_BBOXES
 
-def non_sim(inputs):
-    
-    model_size = (128,128,3)
-    max_output_size = MAX_NUM_BBOXES
-    max_output_size_per_class = MAX_NUM_BBOXES
-    iou_threshold = loss_params['iou_threshold']
-    confidence_threshold = SCORE_THRESHOLD
-                   
-                            
-    bbox, confs, class_probs = tf.split(inputs, [4, 1, -1], axis=-1)
-    bbox=bbox/model_size[0]
-    scores = confs * class_probs
-    boxes, scores, classes, valid_detections = \
-        tf.image.combined_non_max_suppression(
-        boxes=tf.reshape(bbox, (tf.shape(bbox)[0], -1, 1, 4)),
-        scores=tf.reshape(scores, (tf.shape(scores)[0], -1,
-                                   tf.shape(scores)[-1])),
-        max_output_size_per_class=max_output_size_per_class,
-        max_total_size=max_output_size,
-        iou_threshold=iou_threshold,
-        score_threshold=confidence_threshold
-    )
-    return boxes, scores, classes, valid_detections
-
 def non_max_suppression(inputs, anchors, anchor_masks):
     iou_threshold = loss_params['iou_threshold']
     score_threshold = SCORE_THRESHOLD
