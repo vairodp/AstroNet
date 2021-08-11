@@ -12,6 +12,8 @@ BUFFER_SIZE = 100
 PREFETCH_SIZE = 2
 MAX_NUM_BBOXES = 300
 
+NUM_EPOCHS = 70
+
 loss_params = {
     'sensitivity_factor': 1.1,
     'iou_threshold': 0.55,

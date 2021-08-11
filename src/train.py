@@ -7,12 +7,13 @@ import numpy as np
 import datasets
 #from load_weights import load_darknet_weights_in_yolo
 from callbacks.telegram_callback import TelegramCallback
+from callbacks.lr_scheduler import LinearWarmupCosineDecay
 import tensorflow as tf
 from yolo_v4 import YoloV4
 from small_yolo import SmallYolo
 from loss import YoloLoss
 from datasets.ska_dataset import SKADataset
-from configs.train_config import NUM_CLASSES, loss_params, get_anchors
+from configs.train_config import NUM_CLASSES, NUM_EPOCHS, loss_params, get_anchors
 
 import tensorflow_datasets as tfds
 
@@ -62,7 +63,13 @@ tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir='../log')
 
 telegram_callback = TelegramCallback()
 
-reduce_on_plateau = tf.keras.callbacks.ReduceLROnPlateau(min_lr=1e-7)
+warmup_steps = int(0.20 * NUM_EPOCHS)
+
+max_decay_steps = NUM_EPOCHS * 62 - warmup_steps
+
+lr_scheduler = LinearWarmupCosineDecay(initial_lr=0.01, final_lr=1e-5, warmup_steps=warmup_steps, max_decay_steps=max_decay_steps)
+
+#reduce_on_plateau = tf.keras.callbacks.ReduceLROnPlateau(min_lr=1e-7)
 
 #yolo = SmallYolo(num_classes=NUM_CLASSES)
 
@@ -76,5 +83,5 @@ yolo.compile(optimizer=optimizer,
 #yolo = load_darknet_weights_in_yolo(yolo, trainable=True)
 #yolo.summary()
 
-yolo.fit(dataset_train, epochs=250, callbacks=[model_checkpoint_callback, tensorboard_callback, reduce_on_plateau, telegram_callback], 
+yolo.fit(dataset_train, epochs=NUM_EPOCHS, callbacks=[model_checkpoint_callback, tensorboard_callback, lr_scheduler, telegram_callback], 
         validation_data=val_data)
