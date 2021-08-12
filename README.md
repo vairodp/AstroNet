@@ -2,15 +2,15 @@
 
 The code requires python >= 2.7 as well as the following python libraries:
 
-*astropy
-*imgaug
-*matplotlib
-*numpy
-*pandas
-*scikit_learn
-*tensorflow
-*tensorflow_datasets==4.3.0
-*tqdm
+* astropy
+* imgaug
+* matplotlib
+* numpy
+* pandas
+* scikit_learn
+* tensorflow
+* tensorflow_datasets==4.3.0
+* tqdm
 
 
 **Install Modules:** 
