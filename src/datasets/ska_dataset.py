@@ -6,6 +6,13 @@ import numpy as np
 from tensorflow.keras import backend
 from sklearn.utils.class_weight import compute_class_weight
 import math
+from utils import bbox_to_x1y1x2y2, bbox_to_xywh
+
+import imgaug.augmenters as iaa
+from imgaug.augmentables.bbs import BoundingBox, BoundingBoxesOnImage
+
+import matplotlib.pyplot as plt
+from datetime import datetime
 
 import datasets.ska
 from configs.train_config import IMG_SIZE, BUFFER_SIZE, BATCH_SIZE, PREFETCH_SIZE
@@ -107,12 +114,41 @@ class SKADataset:
         return grids
         
     def get_dataset(self):
-        data = self.dataset.map(self.map_features) \
-            .shuffle(BUFFER_SIZE) \
-            .batch(BATCH_SIZE, drop_remainder=True) \
-            .prefetch(PREFETCH_SIZE)
+        data = self.dataset.map(self.map_features).shuffle(BUFFER_SIZE) 
+        if self.mode == 'train':
+            data = data.repeat()
+        data = data.batch(BATCH_SIZE, drop_remainder=True) \
+                    .prefetch(PREFETCH_SIZE)
 
         return data
+    
+    def augment_image_and_bbox(self, image, bbox):
+        # bbox = [x, y, w, h] with values normalized in [0, 1]
+        bbox = bbox_to_x1y1x2y2(bbox)
+        bbox = bbox * IMG_SIZE
+        bbox = [BoundingBox(*box_coords) for box_coords in bbox]
+        bbox = BoundingBoxesOnImage(bbox, shape=image.shape)
+
+        #Apply augmenter to 50% of the images
+        sometimes = lambda aug: iaa.Sometimes(0.5, aug)
+        seq = iaa.Sequential([
+            iaa.Fliplr(0.3),  # horizontally flip 30% of all images
+			iaa.Flipud(0.3),  # vertically flip 30% of all images
+            sometimes(iaa.Rot90((1,3))),
+            sometimes(iaa.TranslateX(px=(-20, 20))),
+            sometimes(iaa.TranslateX(px=(-20, 20))),
+            sometimes(iaa.Affine(scale=2.0)),
+            sometimes(iaa.OneOf([
+                iaa.RemoveSaturation(1.0),
+                iaa.AddToHueAndSaturation((-50, 50), per_channel=True)
+            ]))
+        ])
+        image_aug, bbox_aug = seq(image=image, bounding_boxes=bbox)
+        #plt.imshow(image_aug)
+        #plt.savefig(f'prova/img{datetime.now().strftime("%Y_%m_%d-%I-%M-%S_%p")}.png')
+        bbox_aug = tf.convert_to_tensor([tf.concat([box.coords[0], box.coords[1]], axis=-1) for box in bbox_aug.items])
+        bbox_aug = bbox_to_xywh(bbox_aug) / IMG_SIZE
+        return image_aug, bbox_aug
 
     def map_features(self,feature):
         
@@ -121,6 +157,9 @@ class SKADataset:
         # limit the number of bounding box and label
         bbox = feature["objects"]["bbox"]
         bbox = bbox[:MAX_NUM_BBOXES]
+
+        if self.mode == 'train':
+            image, bbox = tf.numpy_function(self.augment_image_and_bbox, inp=[image, bbox], Tout=[np.uint8, tf.float32])
 
         num_of_bbox = tf.shape(bbox)[0]
         label = tf.zeros(num_of_bbox, dtype=tf.int32)
