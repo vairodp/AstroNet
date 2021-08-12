@@ -1,3 +1,25 @@
+## Requirements
+
+The code requires python >= 2.7 as well as the following python libraries:
+
+*astropy
+*imgaug
+*matplotlib
+*numpy
+*pandas
+*scikit_learn
+*tensorflow
+*tensorflow_datasets==4.3.0
+*tqdm
+
+
+**Install Modules:** 
+
+`pip install -U pip`
+
+`pip install -r requirements.txt`
+
+
 # SKA-DC1
 Deep Learning Approach to the Square Kilometer Array Data Challenge #1 
 
