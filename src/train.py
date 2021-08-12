@@ -13,7 +13,7 @@ from yolo_v4 import YoloV4
 from small_yolo import SmallYolo
 from loss import YoloLoss
 from datasets.ska_dataset import SKADataset
-from configs.train_config import NUM_CLASSES, NUM_EPOCHS, loss_params, get_anchors
+from configs.train_config import NUM_CLASSES, NUM_EPOCHS, ITER_PER_EPOCH, loss_params, get_anchors
 
 import tensorflow_datasets as tfds
 
@@ -63,9 +63,9 @@ tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir='../log')
 
 telegram_callback = TelegramCallback()
 
-warmup_steps = int(0.20 * NUM_EPOCHS) * 62
+warmup_steps = int(0.10 * NUM_EPOCHS) * ITER_PER_EPOCH
 
-max_decay_steps = NUM_EPOCHS * 62 - warmup_steps
+max_decay_steps = NUM_EPOCHS * ITER_PER_EPOCH - warmup_steps
 
 lr_scheduler = LinearWarmupCosineDecay(initial_lr=0.01, final_lr=1e-5, warmup_steps=warmup_steps, max_decay_steps=max_decay_steps)
 
@@ -84,4 +84,4 @@ yolo.compile(optimizer=optimizer,
 #yolo.summary()
 
 yolo.fit(dataset_train, epochs=NUM_EPOCHS, callbacks=[model_checkpoint_callback, tensorboard_callback, lr_scheduler, telegram_callback], 
-        validation_data=val_data)
+        validation_data=val_data, steps_per_epoch=ITER_PER_EPOCH)
