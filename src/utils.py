@@ -4,6 +4,27 @@ import cv2
 
 from configs.train_config import loss_params, SCORE_THRESHOLD, MAX_NUM_BBOXES
 
+def bbox_to_x1y1x2y2(bbox):
+    # bbox = [x, y, w, h] --> bbox = [x1, y1, x2, y2]
+
+    bbox_xy = bbox[..., 0:2]
+    bbox_wh = bbox[..., 2:4]
+    bbox_x1y1 = bbox_xy - bbox_wh / 2
+    bbox_x2y2 = bbox_xy + bbox_wh / 2
+
+    return tf.concat([bbox_x1y1, bbox_x2y2], axis=-1)
+
+def bbox_to_xywh(bbox):
+    # bbox = [x1, y1, x2, y2] --> bbox = [x, y, w, h]
+
+    bbox_x1y1 = bbox[..., 0:2]
+    bbox_x2y2 = bbox[..., 2:4]
+
+    bbox_wh = bbox_x2y2 - bbox_x1y1
+    bbox_xy = bbox_x1y1 + bbox_wh / 2
+
+    return tf.concat([bbox_xy, bbox_wh], axis=-1)
+
 def non_max_suppression(inputs, anchors, anchor_masks):
     iou_threshold = loss_params['iou_threshold']
     score_threshold = SCORE_THRESHOLD
