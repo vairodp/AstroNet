@@ -7,12 +7,12 @@ IMG_SIZE = 128
 
 SCORE_THRESHOLD = 0.5
 
-BATCH_SIZE = 4
+BATCH_SIZE = 16
 BUFFER_SIZE = 100
 PREFETCH_SIZE = 2
 MAX_NUM_BBOXES = 300
 
-NUM_EPOCHS = 70
+NUM_EPOCHS = 250
 
 loss_params = {
     'sensitivity_factor': 1.1,
