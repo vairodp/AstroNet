@@ -7,3 +7,4 @@ scikit_learn
 tensorflow
 tensorflow_datasets==4.3.0
 tqdm
+imgaug
