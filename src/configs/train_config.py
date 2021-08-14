@@ -13,7 +13,7 @@ PREFETCH_SIZE = 2
 MAX_NUM_BBOXES = 30
 
 NUM_EPOCHS = 250
-ITER_PER_EPOCH = 1000
+ITER_PER_EPOCH = 70
 
 loss_params = {
     'sensitivity_factor': 1.1,
