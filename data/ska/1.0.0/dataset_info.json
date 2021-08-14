@@ -11,9 +11,9 @@
   "splits": [
     {
       "name": "train",
-      "numBytes": "10639908",
+      "numBytes": "21636349",
       "shardLengths": [
-        "1251"
+        "1226"
       ]
     }
   ],
