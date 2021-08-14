@@ -37,7 +37,7 @@ class YoloLoss(Loss):
             loss = class_true * backend.log(class_pred) * weights
             loss = -backend.sum(loss, -1)
         else:
-            loss = categorical_crossentropy(class_true, class_pred)
+            loss = binary_crossentropy(class_true, class_pred)
         return loss
 
     def label_smoothing(self, true_labels):

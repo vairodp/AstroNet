@@ -37,10 +37,10 @@ else:
     val_data = SKADataset(mode='validation').get_dataset()
     checkpoints_path = '../checkpoints/yolo/'
 
-checkpoint_filepath = checkpoints_path + 'model.{epoch:02d}-{loss:.2f}.h5'
-class_weights = dataset_train.get_class_weights()
+checkpoint_filepath = checkpoints_path + 'model-best.h5'
+#class_weights = dataset_train.get_class_weights()
 dataset_train = dataset_train.get_dataset()
-#class_weights = None
+class_weights = None
 
 anchors = anchor_dict['anchors']
 anchor_masks = anchor_dict['anchor_masks']
@@ -67,7 +67,7 @@ warmup_steps = int(0.10 * NUM_EPOCHS) * ITER_PER_EPOCH
 
 max_decay_steps = NUM_EPOCHS * ITER_PER_EPOCH - warmup_steps
 
-lr_scheduler = LinearWarmupCosineDecay(initial_lr=0.01, final_lr=1e-5, warmup_steps=warmup_steps, max_decay_steps=max_decay_steps)
+lr_scheduler = LinearWarmupCosineDecay(initial_lr=0.01, final_lr=1e-3, warmup_steps=warmup_steps, max_decay_steps=max_decay_steps)
 
 #reduce_on_plateau = tf.keras.callbacks.ReduceLROnPlateau(min_lr=1e-7)
 
