@@ -10,6 +10,8 @@ from astropy.nddata.utils import Cutout2D
 from astropy.io.fits.verify import VerifyWarning
 from configs.train_config import IMG_SIZE
 
+from photutils.background import Background2D
+
 #Suppressing Warnings
 import warnings 
 warnings.simplefilter('ignore', category=VerifyWarning)
@@ -26,6 +28,10 @@ from tqdm import tqdm
 # b1: KAPPA = 2, no power
 # b2: KAPPA = 2, power=1.2
 KAPPA = 2
+
+PRIMARY_BEAM_B1 = '../data/ancillary/PrimaryBeam_B1.fits'
+PRIMARY_BEAM_B2 = 'PrimaryBeam_B2.fits'
+PRIMARY_BEAM_B5 = 'PrimaryBeam_B5.fits'
 
 def showImage():
 	img = mpimg.imread('/data/imageResult1.png')
@@ -111,8 +117,25 @@ def plot_images_and_bbox(ax, img_array, category, centroid_x, centroid_y, xmin, 
 							facecolor='none')
 	ax.add_patch(center)
 	ax.add_patch(box)
-	ax.imshow(img_array,cmap='gist_heat', origin='lower')
+	ax.imshow(img_array, origin='lower')
 	ax.text(xmin,ymin,text,c=color)
+
+def _setup_pb(primary_beam_file):
+    pbhdu = fits.open(primary_beam_file)
+    pbhead = pbhdu[0].header
+    pb_wcs = pywcs.WCS(pbhead)
+    pb_data = pbhdu[0].data[0][0]
+    return pb_wcs, pb_data
+
+def correct_primary_beam(training_set, pb_wcs, pb_data, x_pixel_res):
+	for _, row in tqdm(training_set.iterrows(), desc='Correcting Primary Beam..'):
+		x, y = pb_wcs.wcs_world2pix([[row['RA (centroid)'], row['DEC (centroid)'], 0, 0]], 0)[0][0:2]
+		pbv = pb_data[int(y)][int(x)]
+		flux = row['FLUX'] * pbv
+		area_pixel = ((row['BMAJ'] / 3600 / x_pixel_res) * (row['BMIN'] / 3600 / x_pixel_res)) / 1.1
+		with np.errstate(divide='ignore', invalid='ignore'):
+			row['FLUX'] = np.nan_to_num(flux / area_pixel, posinf=0.0, neginf=0.0)
+	return training_set
 
 #For now filters with the threshold but should works with everything I hope
 def newDivideImages(img_path, training_set_path, cutouts_path, plot=False):
@@ -126,6 +149,9 @@ def newDivideImages(img_path, training_set_path, cutouts_path, plot=False):
 	#Prep Image
 	fits_img = fits.open(img_path)
 	fits_img = make_fits_2D(fits_img[0])
+
+	# Open primary beam correction file
+	# pb_wcs, pb_data = _setup_pb(beam_correction_file)
 	
 	#Prep Training Set
 	TrainingSet = pd.read_csv(training_set_path, skiprows=17, delimiter='\s+')
@@ -161,12 +187,18 @@ def newDivideImages(img_path, training_set_path, cutouts_path, plot=False):
 		'ymin': []
 	}
 
-	global_count = len(TrainingSet[TrainingSet['SELECTION'] == 1])
+	TrainingSet = TrainingSet[TrainingSet['SELECTION'] == 1]
+
+	global_count = len(TrainingSet)
 	filtered_count = 0
+
+	#TrainingSet = correct_primary_beam(TrainingSet, pb_wcs, pb_data, X_PIXEL_RES)
 
 	#sigma = np.std(fits_img[RANGE_MIN:RANGE_MAX, RANGE_MIN:RANGE_MAX])
 	
-	rms = np.sqrt(np.mean(fits_img[RANGE_MIN:RANGE_MAX, RANGE_MIN:RANGE_MAX] ** 2))
+	fits_img[np.isnan(fits_img)] = 0
+	#rms = np.sqrt(np.mean(fits_img[RANGE_MIN:RANGE_MAX, RANGE_MIN:RANGE_MAX] ** 2))
+	#rms = np.mean(fits_img[RANGE_MIN:RANGE_MAX, RANGE_MIN:RANGE_MAX])
 
 	for i in tqdm(range(RANGE_MIN, RANGE_MAX, IMG_SIZE), desc='Preparing images...'):
 		for j in range(RANGE_MIN, RANGE_MAX, IMG_SIZE):
@@ -174,15 +206,15 @@ def newDivideImages(img_path, training_set_path, cutouts_path, plot=False):
 			pos = (i+(IMG_SIZE/2), j+(IMG_SIZE/2))
 			img_fits = Cutout2D(fits_img, position=pos,size=IMG_SIZE, wcs=WORLD_REF, copy=True)
 			img_array = img_fits.data
-			small_ts = TrainingSet.query('x < @i+@IMG_SIZE and x >= @i and y < @j+@IMG_SIZE and y >= @j and FLUX > (@rms * @KAPPA) and SELECTION == 1')
+			small_ts = TrainingSet.query('x < @i+@IMG_SIZE and x >= @i and y < @j+@IMG_SIZE and y >= @j')
 			
 			if len(small_ts) > 0:
 				prefix_index = img_path.find('B')
 				prefix = img_path[prefix_index:prefix_index+2]
 				filename = f'{prefix}img-{i}-{j}.png'
-				if 'B2' in img_path:
-					img_array = power(img_array, power_index=1.2, scale_min=0.0)
-				plt.imsave(cutouts_path + filename, img_array, cmap='gist_heat', origin='lower')
+				#if 'B2' in img_path:
+				#	img_array = power(img_array, power_index=3.0, scale_min=0.0)
+				plt.imsave(cutouts_path + filename, img_array, origin='lower')
 				if plot:
 					_, ax = plt.subplots()
 				for _, row in small_ts.iterrows():
@@ -284,6 +316,7 @@ def train_test_split(filepath, test_size=0.20):
 
 #newDivideImages(img_path='../data/raw/SKAMid_B1_1000h_v3.fits', 
 #				training_set_path='../data/raw/TrainingSet_B1_v2.txt',
-#				cutouts_path='../data/training/B2_1000h/', plot=True)
+#				beam_correction_file=PRIMARY_BEAM_B1,
+#				cutouts_path='../data/training/B5_1000h/')
 
 #train_test_split(filepath=CUTOUTS_PATH + 'galaxies_560Hz.csv')
