@@ -8,3 +8,4 @@ tensorflow
 tensorflow-datasets==4.3.0
 tqdm
 imgaug
+opencv-python

@@ -11,6 +11,7 @@ The code requires python >= 2.7 as well as the following python libraries:
 * tensorflow
 * tensorflow-datasets==4.3.0
 * tqdm
+* opencv-python
 
 
 **Install Modules:** 
