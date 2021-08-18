@@ -156,25 +156,25 @@ class SKADataset:
 
         # limit the number of bounding box and label
         bbox = feature["objects"]["bbox"]
-        bbox = bbox[:MAX_NUM_BBOXES]
+        #bbox = bbox[:MAX_NUM_BBOXES]
 
         if self.mode == 'train':
             image, bbox = tf.numpy_function(self.augment_image_and_bbox, inp=[image, bbox], Tout=[np.uint8, tf.float32])
 
         num_of_bbox = tf.shape(bbox)[0]
-        label = tf.zeros(num_of_bbox, dtype=tf.int32)
-        label = label[:MAX_NUM_BBOXES]
+        #label = tf.zeros(num_of_bbox, dtype=tf.int32)
+        #label = label[:MAX_NUM_BBOXES]
 
         bbox = tf.numpy_function(self.transform_bbox, inp=[bbox], Tout=tf.float32)
 
-        label_small, label_medium, label_large = tf.numpy_function(self.map_label, inp=[bbox, label],
+        label_small, label_medium, label_large = tf.numpy_function(self.map_label, inp=[bbox, feature['objects']['label']],
                                                                    Tout=[tf.float32, tf.float32, tf.float32])
         # normalize to [-1, 1]
         image = tf.cast(image, tf.float32)
         image = image / 127.5 - 1.0
         #image = (image / self.mean) - self.std
 
-        bbox = self.concat_class(bbox, label)
+        bbox = self.concat_class(bbox, feature['objects']['label'])
         bbox = self.pad_bbox(bbox)
 
         feature_dict = {

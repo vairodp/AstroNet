@@ -152,7 +152,7 @@ class YoloLoss(Loss):
 
         d = tf.square(box_true_center_x - box_pred_center_x) + tf.square(box_true_center_y - box_pred_center_y)
 
-        diou = iou + tf.math.divide_no_nan(d, c2)
+        diou = iou - tf.math.divide_no_nan(d, c2)
 
         return diou
 
@@ -181,18 +181,14 @@ class YoloLoss(Loss):
 
         xy_true, wh_true, obj_true, class_true = self.get_true_scores(y_true)
         box_true = tf.concat([xy_true - wh_true/2.0, xy_true + wh_true/2.0], axis=-1)
-
+        
         class_true = self.label_smoothing(class_true)
         weights = 2 - wh_true[..., 0] * wh_true[..., 1]
 
         # in order to element-wise multiply the result from tf.reduce_sum
         # we need to squeeze one dimension for objectness here
         obj_mask = tf.squeeze(obj_true, axis=-1)
-        #filtered_box_true = tf.boolean_mask(box_true, tf.cast(obj_mask, tf.bool))
-        #print("BOX TRUE FILTERED: ", filtered_box_true.shape)
-        #broadcasted_ious = self.broadcast_iou(filtered_box_true, box_pred)
-        #best_iou, _ = tf.map_fn(lambda x: (tf.reduce_max(x, axis=-1), 0), 
-                                #broadcasted_ious)
+        
         best_iou, _, _ = tf.map_fn(
             lambda x: (tf.reduce_max(self.broadcast_iou(tf.boolean_mask(
                 x[1], tf.cast(x[2], tf.bool)), x[0]), axis=-1), 0, 0),
