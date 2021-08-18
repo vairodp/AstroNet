@@ -7,10 +7,11 @@ The code requires python >= 2.7 as well as the following python libraries:
 * matplotlib
 * numpy
 * pandas
-* scikit_learn
+* scikit-learn
 * tensorflow
-* tensorflow_datasets==4.3.0
+* tensorflow-datasets==4.3.0
 * tqdm
+* opencv-python
 
 
 **Install Modules:** 
