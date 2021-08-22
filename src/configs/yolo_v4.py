@@ -9,16 +9,22 @@ List is structured by "B" indicating a residual block followed by the number of 
 "S" is for scale prediction block and computing the yolo loss
 "U" is for upsampling the feature map and concatenating with a previous layer
 """
+#anchor_dict = {
+#    'anchors': np.array([(0.12,0.23), (0.16,0.11), (0.22,0.21), (0.24,0.40), (0.41,0.25), (0.44,0.73), (0.77,0.42), (1.20,1.07), (2.90,2.86)]),
+#    'anchor_masks':  np.array([[6, 7, 8], [3, 4, 5], [0, 1, 2]])
+#}
+
+
 anchor_dict = {
-    'anchors': np.array([(0.12,0.23), (0.16,0.11), (0.22,0.21), (0.24,0.40), (0.41,0.25), (0.44,0.73), (0.77,0.42), (1.20,1.07), (2.90,2.86)]),
-    'anchor_masks':  np.array([[6, 7, 8], [3, 4, 5], [0, 1, 2]])
+    'anchors': np.array([(0.03,0.06), (0.04,0.03), (0.06,0.05), (0.06,0.10), (0.11,0.18), (0.11,0.07), (0.24,0.14), (0.34,0.36), (0.81,0.77)]),
+    'anchor_masks':  np.array([[6, 7, 8], [3, 4, 5], [0, 1, 2]]),
 }
 
 #Backbone
 cspdarknet53 = [
     (32, 3, 1, 'same', 'mish'),
     ["CSP", 1], #Also, this may not be completely correct, as we only ever use half_filters in one conv and not in all the others, everything else is good though
-    (64, 3, 1, 'same', 'mish'), #According to the pattern I saw on sicara/tf2-yolov4, this has both kernel size and strides = 1
+    (64, 1, 1, 'same', 'mish'), #According to the pattern I saw on sicara/tf2-yolov4, this has both kernel size and strides = 1
     ["CSP", 2],
     (128, 1, 1, 'same', 'mish'),
     ["CSP", 8],
