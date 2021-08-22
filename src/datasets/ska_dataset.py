@@ -1,4 +1,5 @@
 import os
+from anchors import YOLOV4_ANCHORS
 
 import tensorflow as tf
 import tensorflow_datasets as tfds
@@ -16,17 +17,21 @@ from datetime import datetime
 
 import datasets.ska
 from configs.train_config import IMG_SIZE, BUFFER_SIZE, BATCH_SIZE, PREFETCH_SIZE
-from configs.train_config import MAX_NUM_BBOXES, NUM_CLASSES, get_anchors
+from configs.train_config import MAX_NUM_BBOXES, NUM_CLASSES
+
+from anchors import compute_normalized_anchors, YOLOV4_ANCHORS
 
 SPLITS = {
     'train': 'train[:80%]',
     'validation': 'train[80%:90%]',
     'test': 'train[-10%:]'
 }
-
+anchors = compute_normalized_anchors(YOLOV4_ANCHORS, (128,128,3))
+anchors = np.array([anchor for subl in anchors for anchor in subl])
+anchor_masks = np.array([[0, 1, 2], [3, 4, 5], [6, 7, 8]])
 
 class SKADataset:
-    def __init__(self, mode='train', grid_size=32, anchors=get_anchors()['anchors'], anchor_masks=get_anchors()['anchor_masks']):
+    def __init__(self, mode='train', grid_size=32, anchors=anchors, anchor_masks=anchor_masks):
         self.mode = mode
         data_dir = "../data"
         download_dir = data_dir + "/raw"
@@ -179,7 +184,7 @@ class SKADataset:
 
         feature_dict = {
             "image": image,
-            "label": (label_small, label_medium, label_large),
+            "label": (label_large, label_medium, label_small),
             "bbox": bbox,
             "num_of_bbox": num_of_bbox
         }

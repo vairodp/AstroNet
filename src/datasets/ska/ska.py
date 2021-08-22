@@ -8,13 +8,15 @@ import tensorflow_datasets as tfds
 from configs.train_config import IMG_SIZE
 from data_prep import newDivideImages
 
+#TODO: change description
+
 PATHS = {
   'B1_1000h': '../data/raw/SKAMid_B1_1000h_v3.fits',
   'B2_1000h': '../data/raw/SKAMid_B2_1000h_v3.fits',
   'B5_1000h': '../data/raw/SKAMid_B5_1000h_v3.fits',
-  'ANNOT_B1': '../data/raw/TrainingSet_B1_v2.txt',
-  'ANNOT_B2': '../data/raw/TrainingSet_B2_v2.txt',
-  'ANNOT_B5': '../data/raw/TrainingSet_B5_v2.txt',
+  'ANNOT_B1': '../data/raw/TrainingSet_B1_v2_ML.txt',
+  'ANNOT_B2': '../data/raw/TrainingSet_B2_v2_ML.txt',
+  'ANNOT_B5': '../data/raw/TrainingSet_B5_v2_ML.txt',
   'CUTOUTS_B1': '../data/training/B1_1000h/',
   'CUTOUTS_B2': '../data/training/B2_1000h/',
   'CUTOUTS_B5': '../data/training/B5_1000h/',
