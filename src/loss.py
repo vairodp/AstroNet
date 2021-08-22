@@ -3,6 +3,7 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.keras import backend
 from tensorflow.keras.losses import Loss, binary_crossentropy, categorical_crossentropy
+from utils import decode_predictions
 
 from configs.train_config import NUM_CLASSES, loss_params
 
@@ -11,6 +12,8 @@ class YoloLoss(Loss):
     def __init__(self, 
                 anchors,
                 iou_threshold,
+                use_focal_obj_loss=True,
+                use_focal_loss=True,
                 class_weights=None,
                 smooth_factor=0.0, 
                 use_giou=False, 
@@ -20,6 +23,8 @@ class YoloLoss(Loss):
         super().__init__(**kwargs)
         self.smooth_factor = smooth_factor
         self.iou_threshold = iou_threshold
+        self.use_focal_obj_loss = use_focal_obj_loss
+        self.use_focal_loss = use_focal_loss
         self.use_giou = use_giou
         self.use_ciou = use_ciou
         self.use_diou = use_diou
@@ -42,27 +47,6 @@ class YoloLoss(Loss):
 
     def label_smoothing(self, true_labels):
         return true_labels * (1.0 - self.smooth_factor) + self.smooth_factor / NUM_CLASSES
-        
-    def interpret_prediction_boxes(self, pred):
-        grid_size = tf.shape(pred)[1]
-        box_xy, box_wh, objectness, probs = tf.split(pred, (2, 2, 1, -1), axis=-1)
-
-        box_xy = loss_params["sensitivity_factor"] * tf.sigmoid(box_xy)
-        objectness = tf.sigmoid(objectness)
-        probs = tf.sigmoid(probs)
-        box = tf.concat([box_xy, box_wh], axis=-1)
-
-        grid = tf.meshgrid(tf.range(grid_size), tf.range(grid_size))
-        grid = tf.expand_dims(tf.stack(grid, axis=-1), axis=2)
-
-        box_xy = (box_xy + tf.cast(grid, tf.float32)) / tf.cast(grid_size, tf.float32)
-        box_wh = tf.exp(box_wh) * self.valid_anchors
-
-        box_x1y1 = box_xy - box_wh / 2
-        box_x2y2 = box_xy + box_wh / 2
-        bbox = tf.concat([box_x1y1, box_x2y2], axis=-1)
-
-        return bbox, objectness, probs, box
     
     def get_true_scores(self, y_true):
         true_box, true_obj, true_class = tf.split(
@@ -171,13 +155,22 @@ class YoloLoss(Loss):
 
         return ciou
 
-    #TODO maybe?
-    def focal_loss(self):
-        # https://www.analyticsvidhya.com/blog/2020/08/a-beginners-guide-to-focal-loss-in-object-detection/
-        pass
+    def focal_loss(self, y_true, y_pred, gamma=2.0, alpha=0.25, label_smoothing=0):
+        sigmoid_loss = binary_crossentropy(y_true, y_pred, label_smoothing=label_smoothing)
+        sigmoid_loss = tf.expand_dims(sigmoid_loss, axis=-1)
+
+        p_t = ((y_true * y_pred) + ((1 - y_true) * (1 - y_pred)))
+        modulating_factor = tf.pow(1.0 - p_t, gamma)
+        alpha_weight_factor = (y_true * alpha + (1 - y_true) * (1 - alpha))
+
+        sigmoid_focal_loss = modulating_factor * alpha_weight_factor * sigmoid_loss
+
+        sigmoid_focal_loss = tf.reduce_sum(sigmoid_focal_loss, axis=-1)
+
+        return sigmoid_focal_loss
 
     def compute_loss(self, y_true, y_pred):
-        box_pred, obj_pred, class_pred, raw_box_pred = self.interpret_prediction_boxes(y_pred)
+        box_pred, obj_pred, class_pred, raw_box_pred = decode_predictions(y_pred, self.valid_anchors)
 
         xy_true, wh_true, obj_true, class_true = self.get_true_scores(y_true)
         box_true = tf.concat([xy_true - wh_true/2.0, xy_true + wh_true/2.0], axis=-1)
@@ -195,20 +188,17 @@ class YoloLoss(Loss):
             (box_pred, box_true, obj_mask))
         ignore_mask = tf.cast(best_iou < self.iou_threshold, tf.float32)
 
-        '''
+        
         if self.use_focal_obj_loss:
-            confidence_loss = self.focal_loss(true_obj, pred_obj)
+            confidence_loss = self.focal_loss(obj_true, obj_pred)
         else:
-        '''
-        confidence_loss = binary_crossentropy(obj_true, obj_pred)
-        confidence_loss = obj_mask * confidence_loss + (1 - obj_mask) * ignore_mask * confidence_loss
+            confidence_loss = binary_crossentropy(obj_true, obj_pred)
+            confidence_loss = obj_mask * confidence_loss + (1 - obj_mask) * ignore_mask * confidence_loss
 
-        """
         if self.use_focal_loss:
-            class_loss = self.focal_loss(true_class, pred_class)
+            class_loss = self.focal_loss(class_true, class_pred)
         else:
-        """
-        class_loss = obj_mask * self.weighted_cetegorical_crossentropy(class_true, class_pred)
+            class_loss = obj_mask * self.weighted_cetegorical_crossentropy(class_true, class_pred)
 
         # box loss
         if self.use_giou:

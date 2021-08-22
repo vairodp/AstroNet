@@ -1,206 +1,230 @@
+import numpy as np
 import tensorflow as tf
 from tensorflow.keras import backend
-from tensorflow.keras.layers import Concatenate
-from layers import CNNBlock, CSPBlock, SpatialAttention, ScalePrediction, SPPBlock, UpSampling
+from tensorflow.keras.layers import Concatenate, MaxPool2D, UpSampling2D
+from layers import cnn_block, csp_block, scale_prediction
 
-from configs.yolo_v4 import cspdarknet53, panet, head
-from configs.train_config import NUM_CLASSES
+from configs.train_config import NUM_CLASSES, MAX_NUM_BBOXES, SCORE_THRESHOLD, loss_params
 from metrics.mean_ap import mAP
+from utils import decode_predictions, non_max_suppression
 
-#TODO understand why alpha = 0.1
-#TODO understand if the activation function can be apllied before bn or not
-#TODO implement DropBlock layer, maybe?
-#TODO understand why "multiply" in spatial attention
-        
-class Neck(tf.keras.Model):
-    def __init__(self, config, input_shapes, **kwargs):
-        super().__init__(**kwargs)
-        self.concat = Concatenate()
-        self.attentions = []
-        self.in_shapes = {
-            'S': input_shapes[2],
-            'M': input_shapes[1],
-            'L': input_shapes[0]
-        }
-        self.layer_list = {
-            'S': [],
-            'M': [],
-            'L': []
-        }
-        self.upsamplings = {
-            'S': None,
-            'M': None
-        }
-        self.concats = {
-            'M': None,
-            'L': None
-        }
-        self._get_neck(config)
-        self._build_graph(input_shapes)
+from anchors import compute_normalized_anchors
+
+#TODO: remove repetition activation leaky relu        
+#TODO: implement spp as a layer
+
+def csp_darknet53(input_shape):
+
+    inputs = tf.keras.Input(shape=input_shape)
+
+    x = cnn_block(inputs, num_filters=32, kernel_size=3, strides=1, activation="mish")
     
-    def _build_graph(self, input_shape): 
-        input_shape_nobatch = [in_shape[1:] for in_shape in input_shape]
-        self.build(input_shape)
-        inputs = [tf.keras.Input(shape=input_shape_nobatch[i]) for i in range(3)]
-        out = self.call(inputs)
-        self.out_shape = [out[i].shape for i in range(3)]
+    x = cnn_block(
+        x,
+        num_filters=64,
+        kernel_size=3,
+        strides=2,
+        zero_padding=True,
+        padding="valid",
+        activation="mish",
+    ) 
+    route = cnn_block(x, num_filters=64, kernel_size=1, strides=1, activation="mish")
+
+    shortcut = cnn_block(x, num_filters=64, kernel_size=1, strides=1, activation="mish")
+    x = cnn_block(shortcut, num_filters=32, kernel_size=1, strides=1, activation="mish")
+    x = cnn_block(x, num_filters=64, kernel_size=3, strides=1, activation="mish")
+
+    x = x + shortcut
+    x = cnn_block(x, num_filters=64, kernel_size=1, strides=1, activation="mish")
+    x = Concatenate()([x, route])
+    x = cnn_block(x, num_filters=64, kernel_size=1, strides=1, activation="mish")
+
+    x = csp_block(x, filters=128, num_blocks=2)
+
+    output_1 = csp_block(x, filters=256, num_blocks=8)
+
+    output_2 = csp_block(output_1, filters=512, num_blocks=8)
+
+    output_3 = csp_block(output_2, filters=1024, num_blocks=4)
+
+    return tf.keras.Model(inputs, [output_1, output_2, output_3], name="CSPDarknet")
+ 
+def yolov4_neck(input_shapes):    
     
-    def _get_neck(self, config):
-        size = 'S'
-        for module in config:
-            if isinstance(module, str):
-                size = module
-            elif isinstance(module, tuple):
-                num_filters, kernel_size, strides, padding, activation = module
-                conv = CNNBlock(num_filters=num_filters, kernel_size=kernel_size,
-                    padding=padding, activation=activation, strides=strides, input_shape=self.in_shapes[size])
-                self.layer_list[size].append(conv)
-                self.in_shapes[size] = conv.out_shape
-            elif isinstance(module, list):
-                if module[0] == 'SPP':
-                    spp_block = SPPBlock(input_shape = self.in_shapes[size])
-                    self.layer_list[size].append(spp_block)
-                    self.in_shapes[size] = spp_block.out_shape
-                elif module[0] == 'U':
-                    upsampling = UpSampling(num_filters=module[1], input_shape=self.in_shapes[size])
-                    self.upsamplings[size] = upsampling
-                elif module[0] == 'A':
-                    for i in range(module[1]):
-                        self.attentions.append(SpatialAttention(input_shape=list(self.in_shapes.values())[i]))
-                else:
-                    _, num_filters, kernel_size, strides, padding, activation = module
-                    concat = CNNBlock(num_filters=num_filters, 
-                                                kernel_size=kernel_size,
-                                                padding=padding, 
-                                                activation=activation, 
-                                                strides=strides, input_shape=self.in_shapes[size])
-                    self.concats[size] = concat
-                
+    input_1 = tf.keras.Input(shape=filter(None, input_shapes[0]))
+    input_2 = tf.keras.Input(shape=filter(None, input_shapes[1]))
+    input_3 = tf.keras.Input(shape=filter(None, input_shapes[2]))
 
-    def call(self, x, training=False):
-        out_large, out_medium, out_small = x
-        
-        for layer in self.layer_list['S']:
-            out_small = layer(out_small, training=training)
-        small_upsampled = self.upsamplings['S'](out_small, training=training)
-        out_medium = self.concats['M'](out_medium, training=training)
-        out_medium = self.concat([out_medium, small_upsampled])
-        
-        for layer in self.layer_list['M']:
-            out_medium = layer(out_medium, training=training)
-        medium_upsampled = self.upsamplings['M'](out_medium, training=training)
-        out_large = self.concats['L'](out_large, training=training)
-        out_large = self.concat([out_large, medium_upsampled])
-        
-        for layer in self.layer_list['L']:
-            out_large = layer(out_large, training=training)
-        
-        out_small = self.attentions[0](out_small, training=training)
-        out_medium = self.attentions[1](out_medium, training=training)
-        out_large = self.attentions[2](out_large, training=training)
+    x = cnn_block(input_3, num_filters=512, kernel_size=1, strides=1, activation="leaky_relu")
+    x = cnn_block(x, num_filters=1024, kernel_size=3, strides=1, activation="leaky_relu")
+    x = cnn_block(x, num_filters=512, kernel_size=1, strides=1, activation="leaky_relu")
 
-        return out_small, out_medium, out_large
+    maxpool_1 = MaxPool2D((5, 5), strides=1, padding="same")(x)
+    maxpool_2 = MaxPool2D((9, 9), strides=1, padding="same")(x)
+    maxpool_3 = MaxPool2D((13, 13), strides=1, padding="same")(x)
 
+    spp = Concatenate()([maxpool_3, maxpool_2, maxpool_1, x])
 
-class Head(tf.keras.Model):
-    def __init__(self, config, input_shapes, **kwargs):
-        super().__init__(**kwargs)
-        self.in_shapes = {
-            'S': (*input_shapes[0][:-1], input_shapes[0][-1]*2),
-            'M': (*input_shapes[1][:-1], input_shapes[1][-1]*2),
-            'L': input_shapes[2]
-        }
-        self.concat = Concatenate()
-        self.layer_list = {
-            'S': [],
-            'M': [],
-            'L': []
-        }
-        self._get_head(config)
-        self._build_graph(input_shapes)
-    
-    def _build_graph(self, input_shape):
-        input_shape_nobatch = [in_shape[1:] for in_shape in input_shape]
-        self.build(input_shape)
-        inputs = [tf.keras.Input(shape=input_shape_nobatch[i]) for i in range(3)]
-        out = self.call(inputs)
-        self.out_shape = [out[i].shape for i in range(3)]
-    
-    def _get_head(self, config):
-        size = 'L'
+    x = cnn_block(spp, num_filters=512, kernel_size=1, strides=1, activation="leaky_relu")
+    x = cnn_block(x, num_filters=1024, kernel_size=3, strides=1, activation="leaky_relu")
+    output_3 = cnn_block(
+        x, num_filters=512, kernel_size=1, strides=1, activation="leaky_relu"
+    )
+    x = cnn_block(
+        output_3, num_filters=256, kernel_size=1, strides=1, activation="leaky_relu"
+    )
 
-        for module in config:
-            if isinstance(module, str):
-                size = module
-            elif isinstance(module, tuple):
-                num_filters, kernel_size, strides, padding, activation = module
-                conv = CNNBlock(num_filters=num_filters, kernel_size=kernel_size,
-                    padding=padding, activation=activation, strides=strides, input_shape=self.in_shapes[size])
-                self.layer_list[size].append(conv)
-                self.in_shapes[size] = conv.out_shape
-            elif isinstance(module, list):
-                if module[0] == 'S':
-                    self.layer_list[size].append(ScalePrediction(num_filters=module[1], input_shape=self.in_shapes[size]))
+    upsampled = UpSampling2D()(x)
 
-    def call(self, x, training=False):
-        output_small, output_medium, output_large = x
+    x = cnn_block(input_2, num_filters=256, kernel_size=1, strides=1, activation="leaky_relu")
+    x = Concatenate()([x, upsampled])
 
-        shortcut_large = output_large
+    x = cnn_block(x, num_filters=256, kernel_size=1, strides=1, activation="leaky_relu")
+    x = cnn_block(x, num_filters=512, kernel_size=3, strides=1, activation="leaky_relu")
+    x = cnn_block(x, num_filters=256, kernel_size=1, strides=1, activation="leaky_relu")
+    x = cnn_block(x, num_filters=512, kernel_size=3, strides=1, activation="leaky_relu")
+    output_2 = cnn_block(
+        x, num_filters=256, kernel_size=1, strides=1, activation="leaky_relu"
+    )
+    x = cnn_block(
+        output_2, num_filters=128, kernel_size=1, strides=1, activation="leaky_relu"
+    )
 
-        output_large = self.layer_list['L'][0](output_large, training=training)
+    upsampled = UpSampling2D()(x)
 
-        large_downsampled = self.layer_list['L'][1](shortcut_large, training=training)
-        output_medium = self.concat([large_downsampled, output_medium])
+    x = cnn_block(input_1, num_filters=128, kernel_size=1, strides=1, activation="leaky_relu")
+    x = tf.keras.layers.Concatenate()([x, upsampled])
 
-        for layer in self.layer_list['M'][:-2]:
-            output_medium = layer(output_medium, training=training)
-            
+    x = cnn_block(x, num_filters=128, kernel_size=1, strides=1, activation="leaky_relu")
+    x = cnn_block(x, num_filters=256, kernel_size=3, strides=1, activation="leaky_relu")
+    x = cnn_block(x, num_filters=128, kernel_size=1, strides=1, activation="leaky_relu")
+    x = cnn_block(x, num_filters=256, kernel_size=3, strides=1, activation="leaky_relu")
+    output_1 = cnn_block(
+        x, num_filters=128, kernel_size=1, strides=1, activation="leaky_relu"
+    )
 
-        shortcut_medium = output_medium
-        output_medium = self.layer_list['M'][-2](output_medium, training=training)
+    return tf.keras.Model(
+        [input_1, input_2, input_3], [output_1, output_2, output_3], name="YOLOv4_neck"
+    )
 
-        medium_downsampled = self.layer_list['M'][-1](shortcut_medium, training=training)
-        output_small = self.concat([medium_downsampled, output_small])
+def yolov3_head(
+    input_shapes,
+    anchors,
+    num_classes):
+ 
+    input_1 = tf.keras.Input(shape=filter(None, input_shapes[0]))
+    input_2 = tf.keras.Input(shape=filter(None, input_shapes[1]))
+    input_3 = tf.keras.Input(shape=filter(None, input_shapes[2]))
 
-        for layer in self.layer_list['S']:
-            output_small = layer(output_small, training=training)
-        
-        return output_small, output_medium, output_large
+    x = cnn_block(input_1, num_filters=256, kernel_size=3, strides=1, activation="leaky_relu")
+    output_1 = scale_prediction(
+        x, num_anchors_stage=len(anchors[0]), num_classes=num_classes
+    )
 
-mAP_tracker = mAP(overlap_threshold=0.5, name='mAP_0.5')
-#mAP_tracker = DetectionMAP(n_class=NUM_CLASSES)
+    x = cnn_block(
+        input_1,
+        num_filters=256,
+        kernel_size=3,
+        strides=2,
+        zero_padding=True,
+        padding="valid",
+        activation="leaky_relu",
+    )
+    x = Concatenate()([x, input_2])
+    x = cnn_block(x, num_filters=256, kernel_size=1, strides=1, activation="leaky_relu")
+    x = cnn_block(x, num_filters=512, kernel_size=3, strides=1, activation="leaky_relu")
+    x = cnn_block(x, num_filters=256, kernel_size=1, strides=1, activation="leaky_relu")
+    x = cnn_block(x, num_filters=512, kernel_size=3, strides=1, activation="leaky_relu")
+    connection = cnn_block(
+        x, num_filters=256, kernel_size=1, strides=1, activation="leaky_relu"
+    )
+    x = cnn_block(
+        connection, num_filters=512, kernel_size=3, strides=1, activation="leaky_relu"
+    )
+    output_2 = scale_prediction(
+        x, num_anchors_stage=len(anchors[1]), num_classes=num_classes
+    )
 
-class YoloV4(tf.keras.Model):
-    def __init__(self, num_classes, shape=(128, 128, 3), backbone=cspdarknet53, neck=panet, head=head):
-        super().__init__()
+    x = cnn_block(
+        connection,
+        num_filters=512,
+        kernel_size=3,
+        strides=2,
+        zero_padding=True,
+        padding="valid",
+        activation="leaky_relu",
+    )
+    x = Concatenate()([x, input_3])
+    x = cnn_block(x, num_filters=512, kernel_size=1, strides=1, activation="leaky_relu")
+    x = cnn_block(x, num_filters=1024, kernel_size=3, strides=1, activation="leaky_relu")
+    x = cnn_block(x, num_filters=512, kernel_size=1, strides=1, activation="leaky_relu")
+    x = cnn_block(x, num_filters=1024, kernel_size=3, strides=1, activation="leaky_relu")
+    x = cnn_block(x, num_filters=512, kernel_size=1, strides=1, activation="leaky_relu")
+    x = cnn_block(x, num_filters=1024, kernel_size=3, strides=1, activation="leaky_relu")
+    output_3 = scale_prediction(
+        x, num_anchors_stage=len(anchors[2]), num_classes=num_classes
+    )
+
+    return tf.keras.Model([input_1, input_2, input_3], [output_1, output_2, output_3], name="YOLOv3_head")
+
+mAP_tracker = mAP(overlap_threshold=0.5, model='small_yolo', name='mAP_0.5')
+
+class YOLOv4(tf.keras.Model):
+    def __init__(self, input_shape, num_classes,
+        anchors,
+        training=False,
+        yolo_max_boxes=MAX_NUM_BBOXES,
+        yolo_iou_threshold=loss_params['iou_threshold'],
+        yolo_score_threshold=SCORE_THRESHOLD,
+        weights="darknet"):
+        super().__init__(name='YOLOv4')
         self.num_classes = num_classes
-        self.img_shape = shape
-        self.backbone = self._get_backbone(backbone)
-        input_shapes = [self.backbone[i].out_shape for i in [6,8,10]]
-        self.neck = Neck(neck, input_shapes=input_shapes)
-        self.head = Head(head, input_shapes=self.neck.out_shape)
-        self._build_graph(input_shape=(None, *self.img_shape))
+        #self.input_shape = input_shape
+        self.training = training
+        self.anchors = anchors
+        self.yolo_max_boxes = yolo_max_boxes
+        self.yolo_iou_threshold = yolo_iou_threshold
+        self.yolo_score_threshold = yolo_score_threshold
+        #self.weights = weights
+
+        if (input_shape[0] % 32 != 0) | (input_shape[1] % 32 != 0):
+            raise ValueError(
+            f"Provided height and width in input_shape {input_shape} is not a multiple of 32"
+        )
+
+        backbone = csp_darknet53(input_shape)
+
+        neck = yolov4_neck(input_shapes=backbone.output_shape)
+
+        self.normalized_anchors = compute_normalized_anchors(anchors, input_shape)
+        head = yolov3_head(
+            input_shapes=neck.output_shape,
+            anchors=self.normalized_anchors,
+            num_classes=num_classes)
+
+        inputs = tf.keras.Input(shape=input_shape)
+        lower_features = backbone(inputs)
+        medium_features = neck(lower_features)
+        upper_features = head(medium_features)
+
+        self.model = tf.keras.Model(inputs=inputs, outputs=upper_features, name="YOLOv4")
+
+        #weights_path = get_weights_by_keyword_or_path(weights, model=self.model)
+        #if weights_path is not None:
+        #    self.model.load_weights(str(weights_path), by_name=True, skip_mismatch=True)
     
-    @property
-    def metrics(self):
-        return self.compiled_loss.metrics + self.compiled_metrics.metrics + [mAP_tracker]
+    #@property
+    #def metrics(self):
+    #    return self.compiled_loss.metrics + self.compiled_metrics.metrics + [mAP_tracker]
     
-    def _build_graph(self, input_shape): 
-        input_shape_nobatch = input_shape[1:]
-        self.build(input_shape)
-        inputs = tf.keras.Input(shape=input_shape_nobatch)
-        out = self.call(inputs)
-        self.out_shape = [out[i].shape for i in range(3)]
+    def call(self, x, training=False):
+        return self.model(x, training)
     
     def train_step(self, data):
-        # Unpack the data. Its structure depends on your model and
-        # on what you pass to `fit()`.
         x, y = data['image'], list(data['label'])
 
         with tf.GradientTape() as tape:
             y_pred = self(x, training=True)  # Forward pass
-            # Compute the loss value
-            # (the loss function is configured in `compile()`)
             loss = self.compiled_loss(y, y_pred, regularization_losses=self.losses)
 
         # Compute gradients
@@ -211,61 +235,27 @@ class YoloV4(tf.keras.Model):
         # Update metrics (includes the metric that tracks the loss)
         self.compiled_metrics.update_state(y, y_pred)
         #mAP_tracker.update_state(y_pred, data['bbox'], data['num_of_bbox'])
-        mAP_tracker.update_state(y_pred, data['bbox'], data['num_of_bbox'])
-        # Return a dict mapping metric names to current value 
+        
         return {m.name: m.result() for m in self.metrics}
     
     def test_step(self, data):
-        # Unpack the data
         x, y = data['image'], list(data['label'])
-        # Compute predictions
+        
         y_pred = self(x, training=True)
-        # Updates the metrics tracking the loss
         self.compiled_loss(y, y_pred, regularization_losses=self.losses)
-        # Update the metrics.
         self.compiled_metrics.update_state(y, y_pred)
-        # Return a dict mapping metric names to current value.
-        # Note that it will include the loss (tracked in self.metrics).
+
         #mAP_tracker.update_state(y_pred, data['bbox'], data['num_of_bbox'])
-        mAP_tracker.update_state(y_pred, data['bbox'], data['num_of_bbox'])
-        # Return a dict mapping metric names to current value
+
         return {m.name: m.result() for m in self.metrics}
-        #return {m.name: m.result() for m in self.metrics}
-    
-    def _get_backbone(self, config):
-        in_filters = self.img_shape[2]
-        layers = []
-        for module in config:
-            if len(layers) == 0:
-                input_shape = (None, *self.img_shape)
-            else:
-                input_shape = layers[-1].out_shape
-            if isinstance(module, list):
-                repeats = module[-1]
-                layers.append(CSPBlock(num_filters=in_filters*2, num_residual_blocks=repeats, input_shape=input_shape))
-            elif isinstance(module, tuple):
-                out_filters, kernel_size, strides, padding, activation = module
-                layers.append(
-                    CNNBlock(num_filters=out_filters, kernel_size=kernel_size,
-                    padding=padding, activation=activation, strides=strides, input_shape=input_shape)
-                )
-                in_filters = out_filters
-        return layers
-    
-    def call(self, x, training=False):
-        outputs_backbone = []
-        for i, layer in enumerate(self.backbone):
-            if i in [6, 8, 10]:
-                outputs_backbone.append(layer(x, training=training))
-            x = layer(x)
-        x = self.neck(outputs_backbone, training=training)
-        x = self.head(x, training=training)
-        return x
-    
+
     def predict_step(self, data):
-        data = data['image']
-        out = super().predict_step(data)
-        # TODO: pass out to the non_maximum suppression util and return both those outputs and the standard outputs
-        # new_outs = non_max_suppression(out)
-        return out # , new_outs
-    
+        if not isinstance(data, np.ndarray):
+            data = data['image']
+        output_1, output_2, output_3 = self(data)
+        prediction_1 = decode_predictions(output_1, self.normalized_anchors[0])
+        prediction_2 = decode_predictions(output_2, self.normalized_anchors[1])
+        prediction_3 = decode_predictions(output_3, self.normalized_anchors[2])
+        output = non_max_suppression([prediction_1, prediction_2, prediction_3],
+        self.yolo_max_boxes, self.yolo_iou_threshold, self.yolo_score_threshold)
+        return output 
