@@ -47,7 +47,7 @@ def csp_darknet53(input_shape):
 
     output_3 = csp_block(output_2, filters=1024, num_blocks=4)
 
-    return tf.keras.Model(inputs, [output_1, output_2, output_3], name="CSPDarknet")
+    return tf.keras.Model(inputs, [output_1, output_2, output_3], name="CSPDarknet53")
  
 def yolov4_neck(input_shapes):    
     
@@ -167,7 +167,7 @@ def yolov3_head(
 
     return tf.keras.Model([input_1, input_2, input_3], [output_1, output_2, output_3], name="YOLOv3_head")
 
-mAP_tracker = mAP(overlap_threshold=0.5, model='small_yolo', name='mAP_0.5')
+mAP_tracker = mAP(overlap_threshold=0.5, model='yolo', name='mAP_0.5')
 
 class YOLOv4(tf.keras.Model):
     def __init__(self, input_shape, num_classes,
@@ -213,9 +213,9 @@ class YOLOv4(tf.keras.Model):
         #if weights_path is not None:
         #    self.model.load_weights(str(weights_path), by_name=True, skip_mismatch=True)
     
-    #@property
-    #def metrics(self):
-    #    return self.compiled_loss.metrics + self.compiled_metrics.metrics + [mAP_tracker]
+    @property
+    def metrics(self):
+        return self.compiled_loss.metrics + self.compiled_metrics.metrics + [mAP_tracker]
     
     def call(self, x, training=False):
         return self.model(x, training)
@@ -234,7 +234,7 @@ class YOLOv4(tf.keras.Model):
         self.optimizer.apply_gradients(zip(gradients, trainable_vars))
         # Update metrics (includes the metric that tracks the loss)
         self.compiled_metrics.update_state(y, y_pred)
-        #mAP_tracker.update_state(y_pred, data['bbox'], data['num_of_bbox'])
+        mAP_tracker.update_state(y_pred, data['bbox'], data['num_of_bbox'])
         
         return {m.name: m.result() for m in self.metrics}
     
@@ -245,7 +245,7 @@ class YOLOv4(tf.keras.Model):
         self.compiled_loss(y, y_pred, regularization_losses=self.losses)
         self.compiled_metrics.update_state(y, y_pred)
 
-        #mAP_tracker.update_state(y_pred, data['bbox'], data['num_of_bbox'])
+        mAP_tracker.update_state(y_pred, data['bbox'], data['num_of_bbox'])
 
         return {m.name: m.result() for m in self.metrics}
 

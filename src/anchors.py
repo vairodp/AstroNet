@@ -10,9 +10,9 @@ CUSTOM_ANCHORS = [
 ]
 
 YOLOV4_ANCHORS = [
-    np.array([(12, 16), (19, 36), (40, 28)], np.float32),
-    np.array([(36, 75), (76, 55), (72, 146)], np.float32),
-    np.array([(142, 110), (192, 243), (459, 401)], np.float32),
+    np.array([(12, 16), (19, 36), (40, 28)], np.float32) / 4.0,
+    np.array([(36, 75), (76, 55), (72, 146)], np.float32) / 4.0,
+    np.array([(142, 110), (192, 243), (459, 401)], np.float32) / 4.0,
 ]
 
 YOLOV3_ANCHORS = [

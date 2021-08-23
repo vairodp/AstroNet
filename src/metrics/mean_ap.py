@@ -1,8 +1,9 @@
 import numpy as np
 import tensorflow as tf
 
-from configs.train_config import SCORE_THRESHOLD, NUM_CLASSES, get_anchors
-from utils import non_max_suppression
+from configs.train_config import MAX_NUM_BBOXES, SCORE_THRESHOLD, NUM_CLASSES, loss_params
+from anchors import YOLOV4_ANCHORS, compute_normalized_anchors
+from utils import non_max_suppression, decode_predictions
 
 from metrics.ap_utils import APAccumulator, iou
 
@@ -11,16 +12,21 @@ class mAP(tf.keras.metrics.Metric):
     def __init__(self,
         num_classes=NUM_CLASSES, 
         overlap_threshold = SCORE_THRESHOLD,
+        yolo_max_boxes = MAX_NUM_BBOXES,
+        yolo_iou_threshold = loss_params['iou_threshold'],
+        anchors = YOLOV4_ANCHORS,
         model='yolo',
         pr_samples=11, **kwargs):
         super().__init__(**kwargs)
         self.mAP = self.add_weight(name='mAP', initializer='zeros')
         self.n_class = num_classes
         self.overlap_threshold = overlap_threshold
+        self.yolo_max_boxes = yolo_max_boxes
+        self.yolo_iou_threshold = yolo_iou_threshold
         self.pr_scale = np.linspace(0, 1, pr_samples)
         self.total_accumulators = []
         self.reset_state()
-        self.anchor_dict = get_anchors(model)
+        self.anchors = compute_normalized_anchors(anchors, (128,128,3))
     
     def result(self):
         return self.mAP
@@ -34,7 +40,14 @@ class mAP(tf.keras.metrics.Metric):
         self.mAP.assign(0.0)
 
     def update_state(self, y_pred, true_bboxes, num_true_boxes, *args, **kwargs):
-        pred_bboxes, pred_scores, pred_class_ids, valid_detections = non_max_suppression(y_pred, **self.anchor_dict)
+        output_1, output_2, output_3 = y_pred
+        prediction_1 = decode_predictions(output_1, self.anchors[0])
+        prediction_2 = decode_predictions(output_2, self.anchors[1])
+        prediction_3 = decode_predictions(output_3, self.anchors[2])
+        pred_bboxes, pred_scores, pred_class_ids, valid_detections = non_max_suppression([prediction_1, prediction_2, prediction_3], 
+                                                                        self.yolo_max_boxes,
+                                                                        self.yolo_iou_threshold, 
+                                                                        self.overlap_threshold)
 
         for frame in zip(pred_bboxes.numpy(), pred_class_ids.numpy(), 
                          pred_scores.numpy(), valid_detections.numpy(),
@@ -49,7 +62,6 @@ class mAP(tf.keras.metrics.Metric):
             true_bbox = true_box[..., :4]
             true_class = true_box[..., 4]
 
-            #
             frame = pred_bbox, pred_class, pred_score, true_bbox, true_class
             self._update_accumulators(*frame)
         

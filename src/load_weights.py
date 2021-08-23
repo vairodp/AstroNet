@@ -1,82 +1,19 @@
-from typing import Counter
+import os
 import numpy as np
 import tensorflow as tf
-from yolo_v4 import YoloV4, CSPBlock
-from configs.yolo_v4 import NUM_CLASSES, IMG_SIZE, BATCH_SIZE
+from yolo_v4 import YOLOv4
+from configs.train_config import NUM_CLASSES, IMG_SIZE, BATCH_SIZE
+from anchors import CUSTOM_ANCHORS
 
 PRETRAINED_WEIGHTS = '../checkpoints/yolov4.weights'
 INPUT_SHAPE = (BATCH_SIZE, IMG_SIZE, IMG_SIZE, 3)
 
-def get_backbone_layer_list(yolo):
-    darknet = yolo.backbone
-    layers = []
-    for submodel in darknet:
-        if 'cnn_block' in submodel.name:
-            layers.extend(submodel.layers)
-        else:
-            for elem in submodel.layers:
-                if 'cnn_block' in elem.name:
-                    layers.extend(elem.layers)
-                else:
-                    for subelem in elem.layers:
-                        if 'cnn_block' in subelem.name:
-                            layers.extend(subelem.layers)
-                        else:
-                            # It's a residual block
-                            for seq in subelem.layers:
-                                for submodel in seq.layers:
-                                    layers.extend(submodel.layers)
-    return layers
-
-def get_neck_layer_list(yolo):
-    neck = yolo.neck
-    layers = []
-    for submodel in neck.layers:
-        if 'cnn_block' in submodel.name:
-            print(submodel)
-            layers.extend(submodel.layers)
-        elif 'spp_block' in submodel.name or \
-                'spatial_attention' in submodel.name:
-            for block in submodel.layers:
-                if 'cnn_block' in block.name:
-                    layers.extend(block.layers)
-                else:
-                    layers.append(block)
-        elif 'up_sampling' in submodel.name:
-            seq = submodel.layers[0]
-            for block in seq.layers:
-                if 'cnn_block' in block.name:
-                    layers.extend(block.layers)
-                else:
-                    layers.append(block)
-    return layers
-
-def get_head_layer_list(yolo):
-    head = yolo.head
-    layers = []
-    for submodel in head.layers:
-        if 'cnn_block' in submodel.name:
-            layers.extend(submodel.layers)
-        elif 'scale_prediction' in submodel.name:
-            seq = submodel.layers[0]
-            for layer in seq.layers:
-                layers.extend(layer.layers)
-    return layers
-
-def load_darknet_weights_in_yolo(yolo, trainable=False, darknet_weights_path=PRETRAINED_WEIGHTS):
-    """
-    Load the yolov4.weights file into our YOLOv4 model.
-    Args:
-        yolo_model (tf.keras.Model): YOLOv4 model
-        darknet_weights_path (str): Path to the yolov4.weights darknet file
-    Returns:
-        tf.keras.Model: YOLOv4 model with Darknet weights loaded.
-    """
-    model_layers = (get_backbone_layer_list(yolo) + 
-                    get_neck_layer_list(yolo) +
-                    get_head_layer_list(yolo))
-    print(len(model_layers))
-    print(Counter([type(layer) for layer in model_layers]))
+def load_darknet_weights_in_yolo(yolo, trainable=True, darknet_weights_path=PRETRAINED_WEIGHTS):
+    model_layers = (
+        yolo.model.get_layer("CSPDarknet53").layers
+        + yolo.model.get_layer("YOLOv4_neck").layers
+        + yolo.model.get_layer("YOLOv3_head").layers
+    )
 
     # Get all trainable layers: convolutions and batch normalization
     conv_layers = [layer for layer in model_layers if "conv2d" in layer.name]
@@ -93,8 +30,6 @@ def load_darknet_weights_in_yolo(yolo, trainable=False, darknet_weights_path=PRE
         batch_norm_layers[1:], key=lambda x: int(x.name[20:])
     )
 
-    #print([l.name for l in conv_layers])
-
     # Open darknet file and read headers
     darknet_weight_file = open(darknet_weights_path, "rb")
     # First elements of file are major, minor, revision, seen, _
@@ -102,32 +37,26 @@ def load_darknet_weights_in_yolo(yolo, trainable=False, darknet_weights_path=PRE
 
     # Keep an index of which batch norm should be considered.
     # If batch norm is used with a convolution (meaning conv has no bias), the index is incremented
-    # Otherwise (conv has a bias), index is kept still. 
-    # TODO: NOPE! In out case, we have a batch normalization for every conv, 
-    # even if they are not used, thus this index should always be increased
+    # Otherwise (conv has a bias), index is kept still.
     current_matching_batch_norm_index = 0
 
     for layer in conv_layers:
-        print('LAYER: ', layer.name)
         kernel_size = layer.kernel_size
         input_filters = layer.input_shape[-1]
         filters = layer.filters
         use_bias = layer.bias is not None
-
 
         if use_bias:
             # Read bias weight
             conv_bias = np.fromfile(
                 darknet_weight_file, dtype=np.float32, count=filters
             )
-            print('USED BIAS')
         else:
             # Read batch norm
             # Reorder from darknet (beta, gamma, mean, var) to TF (gamma, beta, mean, var)
             batch_norm_weights = np.fromfile(
                 darknet_weight_file, dtype=np.float32, count=4 * filters
             ).reshape((4, filters))[[1, 0, 2, 3]]
-            print('USED BATCH NORM')
 
         # Read kernel weights
         # Reorder from darknet (filters, input_filters, kernel_size[0], kernel_size[1]) to
@@ -148,18 +77,31 @@ def load_darknet_weights_in_yolo(yolo, trainable=False, darknet_weights_path=PRE
             batch_norm_layers[current_matching_batch_norm_index].set_weights(
                 batch_norm_weights
             )
-    
-        current_matching_batch_norm_index += 1
-    
-    conv_layers.extend(batch_norm_layers)
-    for layer in conv_layers:
-        layer.trainable = trainable
+            current_matching_batch_norm_index += 1
 
     #  Check if we read the entire darknet file.
     remaining_chars = len(darknet_weight_file.read())
     darknet_weight_file.close()
-    print(remaining_chars)
+    assert remaining_chars == 0
 
     return yolo
 
-#yolo = YoloV4(num_classes=NUM_CLASSES)
+def save_weights(yolo, folder_path):
+    yolo.model.get_layer("CSPDarknet53").save_weights(folder_path + 'cspdarknet53.h5')
+    yolo.model.get_layer("YOLOv4_neck").save_weights(folder_path + 'yolov4_neck.h5')
+
+def load_weights(yolo, folder_path):
+    if 'cspdarknet53.h5' not in os.listdir(folder_path):
+        yolo_coco = YOLOv4(input_shape=(128,128,3), num_classes=80, anchors=CUSTOM_ANCHORS, weights=None, training=True)
+        yolo_coco = load_darknet_weights_in_yolo(yolo_coco)
+        save_weights(yolo_coco, folder_path)
+    else:
+        yolo.model.get_layer("CSPDarknet53").load_weights(folder_path + 'cspdarknet53.h5')
+        yolo.model.get_layer("YOLOv4_neck").load_weights(folder_path + 'yolov4_neck.h5')
+        #yolo.model.get_layer("CSPDarknet53").trainable = False
+        #yolo.model.get_layer("YOLOv4_neck").trainable = False
+    return yolo
+
+#yolo = YOLOv4(input_shape=(128,128,3), num_classes=NUM_CLASSES, anchors=CUSTOM_ANCHORS, weights=None, training=True)
+#yolo = load_weights(yolo, '../checkpoints/')
+#yolo.model.summary(line_length=170)

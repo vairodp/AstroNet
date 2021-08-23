@@ -1,6 +1,3 @@
-from configs.yolo_v4 import anchor_dict as anchors_yolo
-from configs.small_yolo import anchor_dict as anchors_small
-
 NUM_CLASSES = 3
 
 IMG_SIZE = 128
@@ -12,7 +9,7 @@ BUFFER_SIZE = 100
 PREFETCH_SIZE = 2
 MAX_NUM_BBOXES = 100
 
-NUM_EPOCHS = 500
+NUM_EPOCHS = 250
 ITER_PER_EPOCH = 70
 
 loss_params = {
@@ -20,9 +17,3 @@ loss_params = {
     'iou_threshold': 0.55,
     'smooth_factor': 0.1
 }
-
-def get_anchors(model='yolo'):
-    anchors = anchors_yolo
-    if model == 'small_yolo':
-        anchors = anchors_small
-    return anchors

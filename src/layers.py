@@ -1,6 +1,6 @@
 import tensorflow as tf
 from tensorflow.keras import backend
-from tensorflow.keras.layers import BatchNormalization, Conv2D, Input, ZeroPadding2D, LeakyReLU, UpSampling2D, Layer, Add, MaxPool2D, Concatenate, Activation, Reshape
+from tensorflow.keras.layers import BatchNormalization, Conv2D, Input, ZeroPadding2D, LeakyReLU, Layer, Concatenate, Reshape
 
 from configs.train_config import NUM_CLASSES
 
@@ -28,7 +28,7 @@ def cnn_block(inputs,
                     padding=padding, 
                     use_bias=False)(inputs)
     
-    inputs = tf.keras.layers.BatchNormalization()(inputs)
+    inputs = BatchNormalization()(inputs)
     
     if activation == 'leaky_relu':
         inputs = LeakyReLU(alpha=0.1)(inputs)

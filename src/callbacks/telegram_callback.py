@@ -2,7 +2,7 @@ import tensorflow as tf
 import random
 import requests
 
-EMOJIS = ['&#128053', '&#128054', '&#129418', '&#129437', '&#128049', '&#129412', '&#129427', '&#129428', '&#128013', '&#129430']
+EMOJIS = ['&#128052', '&#128017', '&#128042', '&#128024', '&#128036', '&#128039', '&#129417', '&#128011', '&#128044', '&#128009', '&#128025', '&#129419','&#129409', '&#128030','&#128042']
 
 class TelegramCallback(tf.keras.callbacks.Callback):
     def __init__(self, epoch_interval=10, info_file='callbacks/credentials.txt'):
