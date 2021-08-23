@@ -65,11 +65,13 @@ model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
 
 tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir='../log')
 
-#telegram_callback = TelegramCallback()
+telegram_callback = TelegramCallback()
 
-#warmup_steps = int(0.10 * NUM_EPOCHS) * ITER_PER_EPOCH
+warmup_steps = int(0.10 * NUM_EPOCHS) * ITER_PER_EPOCH
 
-#max_decay_steps = NUM_EPOCHS * ITER_PER_EPOCH - warmup_steps
+max_decay_steps = NUM_EPOCHS * ITER_PER_EPOCH - warmup_steps
+
+lr_scheduler = LinearWarmupCosineDecay(initial_lr=0.01, final_lr = 1e-3, warmup_steps= warmup_steps, max_decay_steps=max_decay_steps)
 
 #lr_scheduler = CyclicLR(base_lr=1e-5, max_lr=1e-2,step_size=ITER_PER_EPOCH*4)
 
@@ -79,7 +81,7 @@ tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir='../log')
 
 yolo.model.summary(line_length=200)
 
-#yolo.load_weights(filepath='../checkpoints/cspdarknet53.h5')
+#yolo.load_weights(filepath='../checkpoints/yolo/best.h5')
 #yolo = load_darknet_weights_in_yolo(yolo, trainable=True)
 
 yolo.compile(optimizer=optimizer, 
@@ -87,5 +89,5 @@ yolo.compile(optimizer=optimizer,
             run_eagerly=True)
 #yolo.summary()
 
-yolo.fit(dataset_train, epochs=NUM_EPOCHS, 
+yolo.fit(dataset_train, epochs=NUM_EPOCHS, callbacks=[model_checkpoint_callback, telegram_callback, lr_scheduler],
         validation_data=val_data, steps_per_epoch=ITER_PER_EPOCH)
