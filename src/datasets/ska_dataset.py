@@ -26,12 +26,9 @@ SPLITS = {
     'validation': 'train[80%:90%]',
     'test': 'train[-10%:]'
 }
-anchors = compute_normalized_anchors(YOLOV4_ANCHORS, (128,128,3))
-anchors = np.array([anchor for subl in anchors for anchor in subl])
-anchor_masks = np.array([[0, 1, 2], [3, 4, 5], [6, 7, 8]])
 
 class SKADataset:
-    def __init__(self, mode='train', grid_size=32, anchors=anchors, anchor_masks=anchor_masks):
+    def __init__(self, mode='train', grid_size=32, anchors=YOLOV4_ANCHORS, anchor_masks=np.array([[0, 1, 2], [3, 4, 5], [6, 7, 8]])):
         self.mode = mode
         data_dir = "../data"
         download_dir = data_dir + "/raw"
@@ -41,22 +38,15 @@ class SKADataset:
                                 data_dir=data_dir,
                                 #download=False,
                                 download_and_prepare_kwargs={'download_dir': download_dir})
-        self.anchors=anchors
+        anchors_temp = compute_normalized_anchors(anchors, (IMG_SIZE, IMG_SIZE, 3))
+        self.anchors= np.array([anchor for subl in anchors_temp for anchor in subl])
         self.anchor_masks = anchor_masks
-        #self.mean, self.std = self._get_mean_and_std()
     
     def get_class_weights(self):
         labels = self.dataset.flat_map(lambda x: tf.data.Dataset.from_tensor_slices(x['objects']['label']))
         labels = list(labels.as_numpy_iterator())
         label_weights = compute_class_weight(class_weight='balanced', classes=np.unique(labels), y=labels)
         return label_weights
-    
-    def _get_mean_and_std(self):
-        images = self.dataset.flat_map(lambda x: tf.data.Dataset.from_tensor_slices(x['image']))
-        images = list(images.as_numpy_iterator())
-        mean = np.mean(images)
-        std = np.std(images)
-        return mean, std
 
     def transform_bbox(self, bbox):
         # bbox = [ymin, xmin, ymax, xmax] ---> [x, y, width, height]
@@ -89,9 +79,13 @@ class SKADataset:
         
         anchor_idx = np.argmax(iou, axis=-1).reshape((-1))  # shape = (1, n) --> (n,)
 
-        label_small = self.yolo_label(bbox, label, self.anchor_masks[0], anchor_idx, grid_size)
+        label_small = self.yolo_label(bbox, label, self.anchor_masks[2], anchor_idx, grid_size)
+        #print('USING anchors: ', self.anchors[self.anchor_masks[0]], 'for input of size: ', label_small.shape)
         label_medium = self.yolo_label(bbox, label, self.anchor_masks[1], anchor_idx, grid_size * 2)
-        label_large = self.yolo_label(bbox, label, self.anchor_masks[2], anchor_idx, grid_size * 4)
+        if len(self.anchor_masks) == 3:
+            label_large = self.yolo_label(bbox, label, self.anchor_masks[0], anchor_idx, grid_size * 4)
+        else:
+            label_large = 0
 
         return label_small, label_medium, label_large
 

@@ -30,6 +30,7 @@ class YoloLoss(Loss):
         self.use_diou = use_diou
         self.valid_anchors = anchors
         self.class_weights = class_weights
+        #print('Using anchors: ', self.valid_anchors)
     
     def weighted_cetegorical_crossentropy(self, class_true, class_pred):
         if self.class_weights is not None:
