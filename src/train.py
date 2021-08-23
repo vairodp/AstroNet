@@ -1,5 +1,7 @@
 import os
 
+from yolo_2d import YOLO2D
+
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
 
 import numpy as np
@@ -10,35 +12,34 @@ from callbacks.telegram_callback import TelegramCallback
 from callbacks.lr_scheduler import CyclicLR, LinearWarmupCosineDecay
 import tensorflow as tf
 from yolo_v4 import YOLOv4
-#from small_yolo import SmallYolo
+from tiny_yolo import TinyYOLOv4
 from loss import YoloLoss
 from datasets.ska_dataset import SKADataset
-from configs.train_config import NUM_CLASSES, NUM_EPOCHS, ITER_PER_EPOCH, loss_params, get_anchors
+from configs.train_config import NUM_CLASSES, NUM_EPOCHS, ITER_PER_EPOCH, loss_params
+
+from load_weights import load_weights
 
 
-from anchors import YOLOV4_ANCHORS,  compute_normalized_anchors
+from anchors import YOLOV4_ANCHORS, compute_normalized_anchors
 
 SMALL = False
 
 #Loading Bar
 #from tqdm import tqdm
 
-anchor_dict = get_anchors()
 
-"""
 if SMALL:
-    anchor_dict = get_anchors(model='small_yolo')
-    yolo = SmallYolo(num_classes=NUM_CLASSES)
-    dataset_train = SKADataset(mode='train', grid_size=8, **anchor_dict)
-    val_data = SKADataset(mode='validation', grid_size=8, **anchor_dict).get_dataset()
+    yolo = TinyYOLOv4(input_shape=(128,128,3), num_classes=NUM_CLASSES, anchors=YOLOV4_ANCHORS, weights=None, training=True)
+    dataset_train = SKADataset(mode='train', grid_size=8)
+    val_data = SKADataset(mode='validation', grid_size=8).get_dataset()
     checkpoints_path = '../checkpoints/small_yolo/'
 
 else:
-"""
-yolo = YOLOv4(input_shape=(128,128,3), num_classes=NUM_CLASSES, anchors=YOLOV4_ANCHORS, weights=None, training=True)
-dataset_train = SKADataset(mode='train')
-val_data = SKADataset(mode='validation').get_dataset()
-checkpoints_path = '../checkpoints/yolo/'
+    yolo = YOLOv4(input_shape=(128,128,3), num_classes=NUM_CLASSES, anchors=YOLOV4_ANCHORS, weights=None, training=True)
+    yolo = load_weights(yolo, folder_path='../checkpoints/')
+    dataset_train = SKADataset(mode='train')
+    val_data = SKADataset(mode='validation').get_dataset()
+    checkpoints_path = '../checkpoints/yolo/'
 
 checkpoint_filepath = checkpoints_path + 'model-best.h5'
 #class_weights = dataset_train.get_class_weights()
@@ -62,7 +63,7 @@ model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
     mode='min',
     save_best_only=True)
 
-#tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir='../log')
+tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir='../log')
 
 telegram_callback = TelegramCallback()
 
@@ -78,7 +79,7 @@ lr_scheduler = LinearWarmupCosineDecay(initial_lr=0.01, final_lr = 1e-3, warmup_
 
 #yolo = SmallYolo(num_classes=NUM_CLASSES)
 
-yolo.model.summary(line_length=170)
+yolo.model.summary(line_length=200)
 
 #yolo.load_weights(filepath='../checkpoints/yolo/best.h5')
 #yolo = load_darknet_weights_in_yolo(yolo, trainable=True)
