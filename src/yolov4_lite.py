@@ -9,8 +9,8 @@ from layers import cnn_block, route_group, scale_prediction, upsample
 
 def cspdarknet53_tiny(input_shape):
     inputs = tf.keras.Input(shape=input_shape)
-    input_data = cnn_block(inputs, num_filters=32, kernel_size=3, strides=2, zero_padding=True, padding='valid')
-    input_data = cnn_block(input_data, num_filters=64, kernel_size=3, strides=2, zero_padding=True, padding='valid')
+    #input_data = cnn_block(inputs, num_filters=32, kernel_size=3, strides=2, zero_padding=True, padding='valid')
+    input_data = cnn_block(inputs, num_filters=64, kernel_size=3, strides=2, zero_padding=True, padding='valid')
     input_data = cnn_block(input_data, num_filters=64, kernel_size=3, strides=1)
 
     route = input_data
@@ -155,3 +155,6 @@ class YOLOv4Lite(tf.keras.Model):
         metrics['reg_loss'] = (loss - y_pred)[0]
 
         return metrics
+
+yolo = YOLOv4Lite((128,128,1), num_classes=3, anchors=np.array([[3,4,5], [0,2,1]]))
+yolo.model.summary()

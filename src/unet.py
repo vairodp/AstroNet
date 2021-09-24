@@ -46,12 +46,39 @@ def unet_body(input_shape, num_classes=NUM_CLASSES+1):
 
     return Model(inputs=inputs, outputs=outputs, name='U-Net')
 
+def unet_body_small(input_shape, num_classes=NUM_CLASSES+1):
+    inputs = Input(shape=input_shape)
+    # Encoder body
+    x = cnn_block(inputs, num_filters=64, kernel_size=3, strides=1, activation='relu')
+    skip64 = cnn_block(x, num_filters=64, kernel_size=3, strides=1, activation='relu')
+    x = MaxPool2D((2,2))(skip64)
+    x = cnn_block(x, num_filters=128, kernel_size=3, strides=1, activation='relu')
+    skip128 = cnn_block(x, num_filters=128, kernel_size=3, strides=1, activation='relu')
+    x = MaxPool2D((2,2))(skip128)
+    x = cnn_block(x, num_filters=256, kernel_size=3, strides=1, activation='relu')
+    skip256 = cnn_block(x, num_filters=256, kernel_size=3, strides=1, activation='relu')
+    x = MaxPool2D((2,2))(skip256)
+    x = cnn_block(x, num_filters=512, kernel_size=3, strides=1, activation='relu')
+
+    # Decoder
+
+    x = decoder_block(inputs=x, skip_connection=skip256, num_filters=256)
+    x = decoder_block(inputs=x, skip_connection=skip128, num_filters=128)
+    x = decoder_block(inputs=x, skip_connection=skip64, num_filters=64)
+
+    outputs = Conv2D(filters=num_classes, kernel_size=1, padding='same')(x)
+
+    return Model(inputs=inputs, outputs=outputs, name='U-Net')
+
 class SourceSegmentation(tf.keras.Model):
-    def __init__(self, input_shape, use_class_weights=True, num_classes=NUM_CLASSES+1):
+    def __init__(self, input_shape, use_class_weights=True, tiny=False, num_classes=NUM_CLASSES+1):
         super().__init__(name='SourceSegmentation')
         self.num_classes = num_classes
         self.use_class_weights = use_class_weights
-        self.model = unet_body(input_shape, num_classes)  
+        if tiny:
+            self.model = unet_body_small(input_shape, num_classes)
+        else:
+            self.model = unet_body(input_shape, num_classes)  
     
     def call(self, x, training=False):
         return self.model(x, training)
@@ -120,13 +147,18 @@ class DisplayCallback(tf.keras.callbacks.Callback):
 
                 ax3.imshow(image)
                 ax3.set_title('REAL IMAGE')
+
+                for ax in (ax1, ax2, ax3):
+                    ax.get_xaxis().set_ticks([])
+                    ax.get_yaxis().set_ticks([])
+
                 plt.savefig(f'../data/results/image_at_epoch_{epoch+1}')
                 break
             break
         
         print ('\nSample Prediction after epoch {}\n'.format(epoch+1))
 
-unet = SourceSegmentation((128,128,1))
+unet = SourceSegmentation((128,128,1), use_class_weights=True)
 unet.model.summary()
 optimizer = tf.keras.optimizers.Adam(learning_rate=0.003, clipvalue=1.0)
 checkpoint_filepath = '../checkpoints/unet-best.h5'
@@ -136,9 +168,11 @@ model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
     monitor='val_loss',
     mode='min',
     save_best_only=True)
+tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir='../log')
+early_stop_callback = tf.keras.callbacks.EarlyStopping(patience=10)
 unet.compile(optimizer=optimizer, loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True), metrics=['accuracy'])
 dataset_train = ConvoSKA(mode='train').get_dataset()
 val_data = ConvoSKA(mode='validation').get_dataset()
 display_callback = DisplayCallback(val_data)
 unet.fit(dataset_train, epochs=NUM_EPOCHS, validation_data=val_data, 
-        callbacks=[model_checkpoint_callback, display_callback], steps_per_epoch=ITER_PER_EPOCH)
+        callbacks=[model_checkpoint_callback, display_callback, tensorboard_callback, early_stop_callback], steps_per_epoch=ITER_PER_EPOCH)

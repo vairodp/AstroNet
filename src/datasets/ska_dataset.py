@@ -157,7 +157,8 @@ class SKADataset:
 
         bbox_aug = tf.convert_to_tensor([tf.concat([box.coords[0][1], box.coords[0][0], box.coords[1][1], box.coords[1][0]], axis=-0) for box in bbox_aug.items])
         #bbox_aug = bbox_to_xywh(bbox_aug) / IMG_SIZE
-        bbox_aug = bbox_aug / IMG_SIZE
+        bbox_aug = tf.cast(bbox_aug / IMG_SIZE, tf.float32)
+        image_aug = tf.cast(image_aug, tf.float32)
         return image_aug, bbox_aug
     
     def aug_img(self, img):
@@ -167,7 +168,6 @@ class SKADataset:
         #plt.imshow(img)
         #plt.savefig(f'prova/img{datetime.now().strftime("%Y_%m_%d-%I-%M-%S_%p")}.png')
         return img
-
 
     def map_features(self,feature):
         
@@ -180,7 +180,7 @@ class SKADataset:
         image = tf.expand_dims(image, axis=-1)
 
         if self.mode == 'train':
-            #image, bbox = tf.numpy_function(self.augment_image_and_bbox, inp=[image, bbox], Tout=[tf.uint8, tf.float32])
+            #image, bbox = tf.numpy_function(self.augment_image_and_bbox, inp=[image, bbox], Tout=[tf.float32, tf.float32])
             image = self.aug_img(image)
             
 
@@ -198,7 +198,6 @@ class SKADataset:
         #image = image / 255.0
         print(tf.math.reduce_std(image))
         image = (image - tf.math.reduce_mean(image)) / tf.math.reduce_std(image)
-        
         print(image.shape)
 
 
