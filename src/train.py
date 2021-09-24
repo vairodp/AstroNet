@@ -6,7 +6,6 @@ import numpy as np
 import tensorflow as tf
 
 from yolo_v4 import YOLOv4
-from tiny_yolo import TinyYOLOv4
 from load_weights import load_weights
 from datasets.ska_dataset import SKADataset
 from callbacks.telegram_callback import TelegramCallback
@@ -16,7 +15,6 @@ from configs.train_config import INITIAL_LR, USE_COSINE_DECAY, USE_TENSORBOARD, 
 
 from anchors import CUSTOM_ANCHORS, YOLOV4_ANCHORS
 
-SMALL = False
 
 if USE_CUSTOM_ANCHORS:
     anchors = CUSTOM_ANCHORS
@@ -25,17 +23,10 @@ else:
     anchors = YOLOV4_ANCHORS
     anchor_masks = np.array([[0, 1, 2], [3, 4, 5], [6, 7, 8]])
 
-if SMALL:
-    yolo = TinyYOLOv4(input_shape=(128,128,3), num_classes=NUM_CLASSES, anchors=YOLOV4_ANCHORS, weights=DARKNET_WEIGHTS)
-    dataset_train = SKADataset(mode='train', grid_size=8)
-    val_data = SKADataset(mode='validation', grid_size=8).get_dataset()
-    checkpoint_filepath= '../checkpoints/small_yolo/model-best.h5'
-
-else:
-    yolo = YOLOv4(input_shape=(128,128,1), num_classes=NUM_CLASSES, anchors=anchors)
-    dataset_train = SKADataset(mode='train', anchors=anchors, anchor_masks=anchor_masks)
-    val_data = SKADataset(mode='validation', anchors=anchors, anchor_masks=anchor_masks).get_dataset()
-    checkpoint_filepath = '../checkpoints/yolo/model-best.h5'
+yolo = YOLOv4(input_shape=(128,128,1), num_classes=NUM_CLASSES, anchors=anchors)
+dataset_train = SKADataset(mode='train', anchors=anchors, anchor_masks=anchor_masks)
+val_data = SKADataset(mode='validation', anchors=anchors, anchor_masks=anchor_masks).get_dataset()
+checkpoint_filepath = '../checkpoints/yolo/model-best.h5'
 
 yolo.model.summary(line_length=200)
 dataset_train = dataset_train.get_dataset()

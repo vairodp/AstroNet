@@ -1,7 +1,3 @@
-# -*- coding=utf-8 -*-
-#!/usr/bin/python3
-
-import math
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras import backend as K
@@ -50,18 +46,6 @@ def yolo3_decode(feats, anchors, num_classes, input_shape, scale_x_y=None, calc_
 def sigmoid_focal_loss(y_true, y_pred, gamma=4.3, alpha=0.25):
     """
     Compute sigmoid focal loss.
-    Reference Paper:
-        "Focal Loss for Dense Object Detection"
-        https://arxiv.org/abs/1708.02002
-    # Arguments
-        y_true: Ground truth targets,
-            tensor of shape (?, num_boxes, num_classes).
-        y_pred: Predicted logits,
-            tensor of shape (?, num_boxes, num_classes).
-        gamma: exponent of the modulating factor (1 - p_t) ^ gamma.
-        alpha: optional alpha weighting factor to balance positives vs negatives.
-    # Returns
-        sigmoid_focal_loss: Sigmoid focal loss, tensor of shape (?, num_boxes).
     """
     sigmoid_loss = K.binary_crossentropy(y_true, y_pred, from_logits=True)
 
@@ -71,7 +55,6 @@ def sigmoid_focal_loss(y_true, y_pred, gamma=4.3, alpha=0.25):
     alpha_weight_factor = (y_true * alpha + (1 - y_true) * (1 - alpha))
 
     sigmoid_focal_loss = modulating_factor * alpha_weight_factor * sigmoid_loss
-    #sigmoid_focal_loss = tf.reduce_sum(sigmoid_focal_loss, axis=-1)
 
     return sigmoid_focal_loss
 
@@ -79,13 +62,6 @@ def sigmoid_focal_loss(y_true, y_pred, gamma=4.3, alpha=0.25):
 def box_iou(b1, b2):
     """
     Return iou tensor
-    Parameters
-    ----------
-    b1: tensor, shape=(i1,...,iN, 4), xywh
-    b2: tensor, shape=(j, 4), xywh
-    Returns
-    -------
-    iou: tensor, shape=(i1,...,iN, j)
     """
     # Expand dim to apply broadcasting.
     b1 = K.expand_dims(b1, -2)
@@ -117,16 +93,6 @@ def box_iou(b1, b2):
 def box_giou(b_true, b_pred):
     """
     Calculate GIoU loss on anchor boxes
-    Reference Paper:
-        "Generalized Intersection over Union: A Metric and A Loss for Bounding Box Regression"
-        https://arxiv.org/abs/1902.09630
-    Parameters
-    ----------
-    b_true: GT boxes tensor, shape=(batch, feat_w, feat_h, anchor_num, 4), xywh
-    b_pred: predict boxes tensor, shape=(batch, feat_w, feat_h, anchor_num, 4), xywh
-    Returns
-    -------
-    giou: tensor, shape=(batch, feat_w, feat_h, anchor_num, 1)
     """
     b_true_xy = b_true[..., :2]
     b_true_wh = b_true[..., 2:4]
@@ -165,17 +131,6 @@ def box_giou(b_true, b_pred):
 def box_diou(b_true, b_pred, use_ciou=False):
     """
     Calculate DIoU/CIoU loss on anchor boxes
-    Reference Paper:
-        "Distance-IoU Loss: Faster and Better Learning for Bounding Box Regression"
-        https://arxiv.org/abs/1911.08287
-    Parameters
-    ----------
-    b_true: GT boxes tensor, shape=(batch, feat_w, feat_h, anchor_num, 4), xywh
-    b_pred: predict boxes tensor, shape=(batch, feat_w, feat_h, anchor_num, 4), xywh
-    use_ciou: bool flag to indicate whether to use CIoU loss type
-    Returns
-    -------
-    diou: tensor, shape=(batch, feat_w, feat_h, anchor_num, 1)
     """
     b_true_xy = b_true[..., :2]
     b_true_wh = b_true[..., 2:4]
@@ -220,30 +175,6 @@ def box_diou(b_true, b_pred, use_ciou=False):
         
         diou = diou - alpha * v
 
-        """
-        # calculate param v and alpha to extend to CIoU
-        v = 4*K.square(tf.math.atan2(b_true_wh[..., 0], b_true_wh[..., 1]) - tf.math.atan2(b_pred_wh[..., 0], b_pred_wh[..., 1])) / (math.pi * math.pi)
-
-        # a trick: here we add an non-gradient coefficient w^2+h^2 to v to customize it's back-propagate,
-        #          to match related description for equation (12) in original paper
-        #
-        #
-        #          v'/w' = (8/pi^2) * (arctan(wgt/hgt) - arctan(w/h)) * (h/(w^2+h^2))          (12)
-        #          v'/h' = -(8/pi^2) * (arctan(wgt/hgt) - arctan(w/h)) * (w/(w^2+h^2))
-        #
-        #          The dominator w^2+h^2 is usually a small value for the cases
-        #          h and w ranging in [0; 1], which is likely to yield gradient
-        #          explosion. And thus in our implementation, the dominator
-        #          w^2+h^2 is simply removed for stable convergence, by which
-        #          the step size 1/(w^2+h^2) is replaced by 1 and the gradient direction
-        #          is still consistent with Eqn. (12).
-        v = v * tf.stop_gradient(b_pred_wh[..., 0] * b_pred_wh[..., 0] + b_pred_wh[..., 1] * b_pred_wh[..., 1])
-
-        alpha = v / (1.0 - iou + v)
-        diou = diou - alpha*v
-        """
-
-
     diou = K.expand_dims(diou, -1)
     return diou
 
@@ -269,34 +200,16 @@ def yolo3_loss(args, anchors,
             focal_gamma=4.3):
     '''
     YOLOv3 loss function.
-    Parameters
-    ----------
-    yolo_outputs: list of tensor, the output of yolo_body or tiny_yolo_body
-    y_true: list of array, the output of preprocess_true_boxes
-    anchors: array, shape=(N, 2), wh
-    num_classes: integer
-    ignore_thresh: float, the iou threshold whether to ignore object confidence loss
-    Returns
-    -------
-    loss: tensor, shape=(1,)
     '''
     yolo_outputs = args[:num_layers][::-1]
     y_true = args[num_layers:][::-1]
 
-    if num_layers == 3:
-        if anchor_masks == 'custom':
-            anchor_mask = [[9], [8,7], [0,1,2,3,4,5,6]]
-        else:
-            anchor_mask = [[6,7,8], [3,4,5], [0,1,2]]
-        grid_size = 32
-        scale_x_y = [1.05, 1.1, 1.2] if elim_grid_sense else [None, None, None]
+    if anchor_masks == 'custom':
+        anchor_mask = [[9], [8,7], [0,1,2,3,4,5,6]]
     else:
-        #anchor_mask = [[3,4,5], [0,1,2]]
-        #grid_size = 16
-        #scale_x_y = [1.05, 1.05] if elim_grid_sense else [None, None]
-        anchor_mask = [[0,1,2,3,4,5,6]]
-        grid_size = 4
-        scale_x_y = [1.05] if elim_grid_sense else [None, None]
+        anchor_mask = [[6,7,8], [3,4,5], [0,1,2]]
+    grid_size = 32
+    scale_x_y = [1.05, 1.1, 1.2] if elim_grid_sense else [None, None, None]
 
     input_shape = K.cast(K.shape(yolo_outputs[0])[1:3] * grid_size, K.dtype(y_true[0]))
     grid_shapes = [K.cast(K.shape(yolo_outputs[i])[1:3], K.dtype(y_true[0])) for i in range(num_layers)]

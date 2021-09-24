@@ -1,13 +1,9 @@
 import tensorflow as tf
 from tensorflow.keras import Model
-import matplotlib.pyplot as plt
-from tensorflow.keras.utils import plot_model
-from tensorflow.keras.layers import Input, MaxPool2D, Concatenate, Conv2D, Conv2DTranspose
-from configs.train_config import ITER_PER_EPOCH, NUM_CLASSES, NUM_EPOCHS
+from tensorflow.keras.layers import Input, MaxPool2D, Conv2D
+
 from layers import cnn_block, decoder_block
-from callbacks.telegram_callback import TelegramCallback
-from callbacks.display_callback import DisplayCallback
-from datasets.convo_ska import ConvoSKA
+from configs.train_config import NUM_CLASSES
 
 def unet_body(input_shape, num_classes=NUM_CLASSES+1):
     inputs = Input(shape=input_shape)
@@ -92,9 +88,8 @@ class SourceSegmentation(tf.keras.Model):
         self.optimizer.apply_gradients(zip(gradients, trainable_vars))
         # Update metrics (includes the metric that tracks the loss)
         self.compiled_metrics.update_state(y, y_pred, sample_weight=sample_weights)
-        #mAP_tracker.update_state(y_pred, data['bbox'], data['num_of_bbox'])
+
         metrics = {m.name: m.result() for m in self.metrics}
-        #metrics['reg_loss'] = (loss - y_pred)[0]
         return metrics
     
     def test_step(self, data):
@@ -107,27 +102,6 @@ class SourceSegmentation(tf.keras.Model):
         self.compiled_loss(y, y_pred, sample_weight=sample_weights, regularization_losses=self.losses)
         self.compiled_metrics.update_state(y, y_pred, sample_weight=sample_weights)
 
-        #mAP_tracker.update_state(y_pred, data['bbox'], data['num_of_bbox'])
         metrics = {m.name: m.result() for m in self.metrics}
-        #metrics['reg_loss'] = (loss - y_pred)[0]
 
         return metrics
-
-unet = SourceSegmentation((128,128,1), use_class_weights=True)
-unet.model.summary()
-optimizer = tf.keras.optimizers.Adam(learning_rate=0.003, clipvalue=1.0)
-checkpoint_filepath = '../checkpoints/unet-best.h5'
-model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
-    filepath=checkpoint_filepath,
-    save_weights_only=True,
-    monitor='val_loss',
-    mode='min',
-    save_best_only=True)
-tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir='../log')
-early_stop_callback = tf.keras.callbacks.EarlyStopping(patience=10)
-unet.compile(optimizer=optimizer, loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True), metrics=['accuracy'])
-dataset_train = ConvoSKA(mode='train').get_dataset()
-val_data = ConvoSKA(mode='validation').get_dataset()
-display_callback = DisplayCallback(val_data)
-unet.fit(dataset_train, epochs=NUM_EPOCHS, validation_data=val_data, 
-        callbacks=[model_checkpoint_callback, display_callback, tensorboard_callback, early_stop_callback], steps_per_epoch=ITER_PER_EPOCH)
