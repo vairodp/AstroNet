@@ -1,17 +1,12 @@
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras import backend
-from tensorflow.keras.layers import Concatenate, MaxPool2D, UpSampling2D
-from layers import cnn_block, csp_block, scale_prediction
 
-from configs.train_config import NUM_CLASSES, MAX_NUM_BBOXES, SCORE_THRESHOLD, loss_params
-from metrics.mean_ap import mAP
-from utils import decode_predictions, non_max_suppression
-
+from loss import yolo3_loss
 from anchors import compute_normalized_anchors
+from layers import cnn_block, csp_block, scale_prediction
+from tensorflow.keras.layers import Concatenate, MaxPool2D, UpSampling2D, Input, Lambda
 
-#TODO: remove repetition activation leaky relu        
-#TODO: implement spp as a layer
+from configs.train_config import NUM_CLASSES, MAX_NUM_BBOXES, SCORE_THRESHOLD, USE_CUSTOM_ANCHORS, loss_params
 
 def csp_darknet53(input_shape):
 
@@ -118,7 +113,7 @@ def yolov3_head(
 
     x = cnn_block(input_1, num_filters=256, kernel_size=3, strides=1, activation="leaky_relu")
     output_1 = scale_prediction(
-        x, num_anchors_stage=len(anchors[0]), num_classes=num_classes
+        x, num_anchors_stage=len(anchors[0]), num_classes=num_classes, num=93
     )
 
     x = cnn_block(
@@ -142,7 +137,7 @@ def yolov3_head(
         connection, num_filters=512, kernel_size=3, strides=1, activation="leaky_relu"
     )
     output_2 = scale_prediction(
-        x, num_anchors_stage=len(anchors[1]), num_classes=num_classes
+        x, num_anchors_stage=len(anchors[1]), num_classes=num_classes, num=101
     )
 
     x = cnn_block(
@@ -162,30 +157,24 @@ def yolov3_head(
     x = cnn_block(x, num_filters=512, kernel_size=1, strides=1, activation="leaky_relu")
     x = cnn_block(x, num_filters=1024, kernel_size=3, strides=1, activation="leaky_relu")
     output_3 = scale_prediction(
-        x, num_anchors_stage=len(anchors[2]), num_classes=num_classes
+        x, num_anchors_stage=len(anchors[2]), num_classes=num_classes, num=109
     )
 
     return tf.keras.Model([input_1, input_2, input_3], [output_1, output_2, output_3], name="YOLOv3_head")
 
-mAP_tracker = mAP(overlap_threshold=0.5, model='yolo', name='mAP_0.5')
-
 class YOLOv4(tf.keras.Model):
-    def __init__(self, input_shape, num_classes,
+    def __init__(self, input_shape, 
+        num_classes,
         anchors,
-        training=False,
         yolo_max_boxes=MAX_NUM_BBOXES,
         yolo_iou_threshold=loss_params['iou_threshold'],
-        yolo_score_threshold=SCORE_THRESHOLD,
-        weights="darknet"):
+        yolo_score_threshold=SCORE_THRESHOLD):
         super().__init__(name='YOLOv4')
         self.num_classes = num_classes
-        #self.input_shape = input_shape
-        self.training = training
         self.anchors = anchors
         self.yolo_max_boxes = yolo_max_boxes
         self.yolo_iou_threshold = yolo_iou_threshold
         self.yolo_score_threshold = yolo_score_threshold
-        #self.weights = weights
 
         if (input_shape[0] % 32 != 0) | (input_shape[1] % 32 != 0):
             raise ValueError(
@@ -207,15 +196,40 @@ class YOLOv4(tf.keras.Model):
         medium_features = neck(lower_features)
         upper_features = head(medium_features)
 
-        self.model = tf.keras.Model(inputs=inputs, outputs=upper_features, name="YOLOv4")
+        anchors = np.array([anchor for subl in self.normalized_anchors for anchor in subl])
 
-        #weights_path = get_weights_by_keyword_or_path(weights, model=self.model)
-        #if weights_path is not None:
-        #    self.model.load_weights(str(weights_path), by_name=True, skip_mismatch=True)
+        y_true = [Input(shape=(None, None, len(self.anchors[l]), NUM_CLASSES+5), name='y_true_{}'.format(l)) for l in range(3)]
+
+        self.model_body = tf.keras.Model(inputs=inputs, outputs=upper_features, name="YOLOv4")
+        model_loss, location_loss, confidence_loss, class_loss = Lambda(
+            yolo3_loss, name='yolo_loss',
+            arguments={'anchors': anchors, 
+                    'anchor_masks': 'custom' if USE_CUSTOM_ANCHORS else 'yolo',
+                    'num_layers': 3,
+                    'num_classes': NUM_CLASSES, 
+                    'ignore_thresh': loss_params['iou_threshold'], 
+                    'label_smoothing': loss_params['smooth_factor'], 
+                    'elim_grid_sense': loss_params['elim_grid_sense'],
+                    'use_vf_loss': loss_params['use_vf_loss'], 
+                    'use_focal_loss': loss_params['use_focal_loss'],
+                    'use_focal_obj_loss': loss_params['use_focal_obj_loss'],
+                    'use_diou_loss': loss_params['use_diou'],
+                    'use_giou_loss': loss_params['use_giou'],
+                    'use_ciou_loss': loss_params['use_ciou'],
+                    'focal_gamma': loss_params['focal_gamma']})([*upper_features, *y_true])
+
+        self.model = tf.keras.Model([self.model_body.input, *y_true], model_loss)
+
+        loss_dict = {'location_loss':location_loss, 'confidence_loss':confidence_loss, 'class_loss':class_loss}
+        self.add_metrics(loss_dict)
     
-    @property
-    def metrics(self):
-        return self.compiled_loss.metrics + self.compiled_metrics.metrics + [mAP_tracker]
+    def add_metrics(self, metric_dict):
+        '''
+        add metric scalar tensor into model, which could be tracked in training
+        log and tensorboard callback
+        '''
+        for (name, metric) in metric_dict.items():
+            self.model.add_metric(metric, name=name, aggregation='mean')
     
     def call(self, x, training=False):
         return self.model(x, training)
@@ -224,7 +238,7 @@ class YOLOv4(tf.keras.Model):
         x, y = data['image'], list(data['label'])
 
         with tf.GradientTape() as tape:
-            y_pred = self(x, training=True)  # Forward pass
+            y_pred = self([x, *y], training=True)  # Forward pass
             loss = self.compiled_loss(y, y_pred, regularization_losses=self.losses)
 
         # Compute gradients
@@ -234,28 +248,25 @@ class YOLOv4(tf.keras.Model):
         self.optimizer.apply_gradients(zip(gradients, trainable_vars))
         # Update metrics (includes the metric that tracks the loss)
         self.compiled_metrics.update_state(y, y_pred)
-        mAP_tracker.update_state(y_pred, data['bbox'], data['num_of_bbox'])
-        
-        return {m.name: m.result() for m in self.metrics}
+        metrics = {m.name: m.result() for m in self.metrics}
+        metrics['reg_loss'] = (loss - y_pred)[0]
+        return metrics
     
     def test_step(self, data):
         x, y = data['image'], list(data['label'])
         
-        y_pred = self(x, training=True)
-        self.compiled_loss(y, y_pred, regularization_losses=self.losses)
+        y_pred = self([x, *y], training=True)
+        loss = self.compiled_loss(y, y_pred, regularization_losses=self.losses)
         self.compiled_metrics.update_state(y, y_pred)
 
-        mAP_tracker.update_state(y_pred, data['bbox'], data['num_of_bbox'])
+        metrics = {m.name: m.result() for m in self.metrics}
+        metrics['reg_loss'] = (loss - y_pred)[0]
 
-        return {m.name: m.result() for m in self.metrics}
+        return metrics
 
     def predict_step(self, data):
-        if not isinstance(data, np.ndarray):
-            data = data['image']
-        output_1, output_2, output_3 = self(data)
-        prediction_1 = decode_predictions(output_1, self.normalized_anchors[0])
-        prediction_2 = decode_predictions(output_2, self.normalized_anchors[1])
-        prediction_3 = decode_predictions(output_3, self.normalized_anchors[2])
-        output = non_max_suppression([prediction_1, prediction_2, prediction_3],
-        self.yolo_max_boxes, self.yolo_iou_threshold, self.yolo_score_threshold)
-        return output 
+        if isinstance(data, dict):
+            x = data['image']
+        else:
+            x = data
+        return self.model_body(x)

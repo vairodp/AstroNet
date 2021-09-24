@@ -1,245 +1,396 @@
+# -*- coding=utf-8 -*-
+#!/usr/bin/python3
+
+import math
 import numpy as np
-
 import tensorflow as tf
-from tensorflow.keras import backend
-from tensorflow.keras.losses import Loss, binary_crossentropy, categorical_crossentropy
-from utils import decode_predictions
+from tensorflow.keras import backend as K
 
-from configs.train_config import NUM_CLASSES, loss_params
+def varifocal_loss(y_true, y_pred, gamma=1.5, alpha=0.25):
+    loss = K.binary_crossentropy(y_true, y_pred, from_logits=True)
+    pred_prob = K.sigmoid(y_pred)  # prob from logits
 
+    focal_weight = y_true * tf.cast((y_true > 0.0), tf.float32) + alpha * tf.pow(tf.abs(pred_prob - y_true), gamma) * tf.cast((y_true <= 0.0), tf.float32)
+    loss *= focal_weight
 
-class YoloLoss(Loss):
-    def __init__(self, 
-                anchors,
-                iou_threshold,
-                use_focal_obj_loss=True,
-                use_focal_loss=True,
-                class_weights=None,
-                smooth_factor=0.0, 
-                use_giou=False, 
-                use_ciou=False, 
-                use_diou=False, 
-                **kwargs):
-        super().__init__(**kwargs)
-        self.smooth_factor = smooth_factor
-        self.iou_threshold = iou_threshold
-        self.use_focal_obj_loss = use_focal_obj_loss
-        self.use_focal_loss = use_focal_loss
-        self.use_giou = use_giou
-        self.use_ciou = use_ciou
-        self.use_diou = use_diou
-        self.valid_anchors = anchors
-        self.class_weights = class_weights
-        #print('Using anchors: ', self.valid_anchors)
-    
-    def weighted_cetegorical_crossentropy(self, class_true, class_pred):
-        if self.class_weights is not None:
-            weights = backend.variable(self.class_weights)
-            # scale predictions so that the class probas of each sample sum to 1
-            class_pred = tf.math.divide_no_nan(class_pred, backend.sum(class_pred, axis=-1, keepdims=True))
-            # clip to prevent NaN's and Inf's
-            class_pred = backend.clip(class_pred, backend.epsilon(), 1 - backend.epsilon())
-            # calc
-            loss = class_true * backend.log(class_pred) * weights
-            loss = -backend.sum(loss, -1)
-        else:
-            loss = binary_crossentropy(class_true, class_pred)
-        return loss
+    return loss
 
-    def label_smoothing(self, true_labels):
-        return true_labels * (1.0 - self.smooth_factor) + self.smooth_factor / NUM_CLASSES
-    
-    def get_true_scores(self, y_true):
-        true_box, true_obj, true_class = tf.split(
-            y_true, (4, 1, NUM_CLASSES), axis=-1)
-        true_xy = true_box[..., 0:2]
-        true_wh = true_box[..., 2:4]
-        
-        return true_xy, true_wh, true_obj, true_class
+def yolo3_decode(feats, anchors, num_classes, input_shape, scale_x_y=None, calc_loss=False):
+    """Decode final layer features to bounding box parameters."""
+    num_anchors = len(anchors)
+    # Reshape to batch, height, width, num_anchors, box_params.
+    anchors_tensor = K.reshape(K.constant(anchors), [1, 1, 1, num_anchors, 2])
 
-    def interpret_true_boxes(self, y_true):
-        grid_size = tf.shape(y_true)[1]
-        grid = tf.meshgrid(tf.range(grid_size), tf.range(grid_size))
-        grid = tf.expand_dims(tf.stack(grid, axis=-1), axis=2)
+    grid_shape = K.shape(feats)[1:3] # height, width
+    grid_y = K.tile(K.reshape(K.arange(0, stop=grid_shape[0]), [-1, 1, 1, 1]),
+        [1, grid_shape[1], 1, 1])
+    grid_x = K.tile(K.reshape(K.arange(0, stop=grid_shape[1]), [1, -1, 1, 1]),
+        [grid_shape[0], 1, 1, 1])
+    grid = K.concatenate([grid_x, grid_y])
+    grid = K.cast(grid, K.dtype(feats))
 
-        true_xy, true_wh, _, _ = self.get_true_scores(y_true)
-        true_xy = true_xy * tf.cast(grid_size, tf.float32) - \
-                      tf.cast(grid, tf.float32)
-        true_wh = tf.math.log(true_wh / self.valid_anchors)
-        true_wh = tf.where(tf.math.is_inf(true_wh),
-                               tf.zeros_like(true_wh), true_wh)
+    feats = K.reshape(
+        feats, [-1, grid_shape[0], grid_shape[1], num_anchors, num_classes + 5])
 
-        return true_xy, true_wh
+    # Adjust preditions to each spatial grid point and anchor size.
+    if scale_x_y:
+        # Eliminate grid sensitivity trick involved in YOLOv4
+        box_xy_tmp = K.sigmoid(feats[..., :2]) * scale_x_y - (scale_x_y - 1) / 2
+        box_xy = (box_xy_tmp + grid) / K.cast(grid_shape[..., ::-1], K.dtype(feats))
+    else:
+        box_xy = (K.sigmoid(feats[..., :2]) + grid) / K.cast(grid_shape[..., ::-1], K.dtype(feats))
+    box_wh = K.exp(feats[..., 2:4]) * anchors_tensor / K.cast(input_shape[..., ::-1], K.dtype(feats))
+    box_confidence = K.sigmoid(feats[..., 4:5])
+    box_class_probs = K.sigmoid(feats[..., 5:])
 
-    def iou(self, box_true, box_pred):
-        width = tf.maximum(tf.minimum(box_true[..., 2], box_pred[..., 2]) -
-                           tf.maximum(box_true[..., 0], box_pred[..., 0]), 0)
-        height = tf.maximum(tf.minimum(box_true[..., 3], box_pred[..., 3]) -
-                           tf.maximum(box_true[..., 1], box_pred[..., 1]), 0)
-                                                   
-        area = width * height
-        box_true_area = (box_true[..., 2] - box_true[..., 0]) * \
-                     (box_true[..., 3] - box_true[..., 1])
-        box_pred_area = (box_pred[..., 2] - box_pred[..., 0]) * \
-                     (box_pred[..., 3] - box_pred[..., 1])
+    if calc_loss == True:
+        return grid, feats, box_xy, box_wh
+    return box_xy, box_wh, box_confidence, box_class_probs
+
+def sigmoid_focal_loss(y_true, y_pred, gamma=4.3, alpha=0.25):
+    """
+    Compute sigmoid focal loss.
+    Reference Paper:
+        "Focal Loss for Dense Object Detection"
+        https://arxiv.org/abs/1708.02002
+    # Arguments
+        y_true: Ground truth targets,
+            tensor of shape (?, num_boxes, num_classes).
+        y_pred: Predicted logits,
+            tensor of shape (?, num_boxes, num_classes).
+        gamma: exponent of the modulating factor (1 - p_t) ^ gamma.
+        alpha: optional alpha weighting factor to balance positives vs negatives.
+    # Returns
+        sigmoid_focal_loss: Sigmoid focal loss, tensor of shape (?, num_boxes).
+    """
+    sigmoid_loss = K.binary_crossentropy(y_true, y_pred, from_logits=True)
+
+    pred_prob = tf.sigmoid(y_pred)
+    p_t = ((y_true * pred_prob) + ((1 - y_true) * (1 - pred_prob)))
+    modulating_factor = tf.pow(1.0 - p_t, gamma)
+    alpha_weight_factor = (y_true * alpha + (1 - y_true) * (1 - alpha))
+
+    sigmoid_focal_loss = modulating_factor * alpha_weight_factor * sigmoid_loss
+    #sigmoid_focal_loss = tf.reduce_sum(sigmoid_focal_loss, axis=-1)
+
+    return sigmoid_focal_loss
 
 
-        area_union = box_true_area + box_pred_area - area
-        iou = tf.math.divide_no_nan(area, area_union)
-        
-        return area_union, iou
-    
-    def broadcast_iou(self, box_true, box_pred):
-        # broadcast boxes
-        #box_true = tf.reshape(box_true, (-1, 4))
-        #print('NEW BOX TRUE: ' , box_true.shape)
+def box_iou(b1, b2):
+    """
+    Return iou tensor
+    Parameters
+    ----------
+    b1: tensor, shape=(i1,...,iN, 4), xywh
+    b2: tensor, shape=(j, 4), xywh
+    Returns
+    -------
+    iou: tensor, shape=(i1,...,iN, j)
+    """
+    # Expand dim to apply broadcasting.
+    b1 = K.expand_dims(b1, -2)
+    b1_xy = b1[..., :2]
+    b1_wh = b1[..., 2:4]
+    b1_wh_half = b1_wh/2.
+    b1_mins = b1_xy - b1_wh_half
+    b1_maxes = b1_xy + b1_wh_half
 
-        #box_true = box_true[:,-1]
-        
-        box_pred = tf.expand_dims(box_pred, -2)
-        box_true = tf.expand_dims(box_true, 0)
-        
-        # new_shape: (..., N, (x1, y1, x2, y2))
-        new_shape = tf.broadcast_dynamic_shape(tf.shape(box_pred), tf.shape(box_true))
-        box_true = tf.broadcast_to(box_true, new_shape)
-        box_pred = tf.broadcast_to(box_pred, new_shape)
+    # Expand dim to apply broadcasting.
+    b2 = K.expand_dims(b2, 0)
+    b2_xy = b2[..., :2]
+    b2_wh = b2[..., 2:4]
+    b2_wh_half = b2_wh/2.
+    b2_mins = b2_xy - b2_wh_half
+    b2_maxes = b2_xy + b2_wh_half
 
-        _, iou = self.iou(box_true, box_pred)
+    intersect_mins = K.maximum(b1_mins, b2_mins)
+    intersect_maxes = K.minimum(b1_maxes, b2_maxes)
+    intersect_wh = K.maximum(intersect_maxes - intersect_mins, 0.)
+    intersect_area = intersect_wh[..., 0] * intersect_wh[..., 1]
+    b1_area = b1_wh[..., 0] * b1_wh[..., 1]
+    b2_area = b2_wh[..., 0] * b2_wh[..., 1]
+    iou = intersect_area / (b1_area + b2_area - intersect_area)
 
-        return iou
+    return iou
 
-    def giou(self, box_true, box_pred):
-        area_union, iou = self.iou(box_true, box_pred)
 
-        enclose_left_up = tf.minimum(box_true[..., :2], box_pred[..., :2])
-        enclose_right_down = tf.maximum(box_true[..., 2:], box_pred[..., 2:])
-        enclose = tf.maximum(enclose_right_down - enclose_left_up, 0.0)
-        enclose_area = enclose[..., 0] * enclose[..., 1]
-        giou = iou - 1.0 * tf.math.divide_no_nan((enclose_area - area_union), enclose_area)
+def box_giou(b_true, b_pred):
+    """
+    Calculate GIoU loss on anchor boxes
+    Reference Paper:
+        "Generalized Intersection over Union: A Metric and A Loss for Bounding Box Regression"
+        https://arxiv.org/abs/1902.09630
+    Parameters
+    ----------
+    b_true: GT boxes tensor, shape=(batch, feat_w, feat_h, anchor_num, 4), xywh
+    b_pred: predict boxes tensor, shape=(batch, feat_w, feat_h, anchor_num, 4), xywh
+    Returns
+    -------
+    giou: tensor, shape=(batch, feat_w, feat_h, anchor_num, 1)
+    """
+    b_true_xy = b_true[..., :2]
+    b_true_wh = b_true[..., 2:4]
+    b_true_wh_half = b_true_wh/2.
+    b_true_mins = b_true_xy - b_true_wh_half
+    b_true_maxes = b_true_xy + b_true_wh_half
 
-        return giou
+    b_pred_xy = b_pred[..., :2]
+    b_pred_wh = b_pred[..., 2:4]
+    b_pred_wh_half = b_pred_wh/2.
+    b_pred_mins = b_pred_xy - b_pred_wh_half
+    b_pred_maxes = b_pred_xy + b_pred_wh_half
 
-    def diou(self, box_true, box_pred):
+    intersect_mins = K.maximum(b_true_mins, b_pred_mins)
+    intersect_maxes = K.minimum(b_true_maxes, b_pred_maxes)
+    intersect_wh = K.maximum(intersect_maxes - intersect_mins, 0.)
+    intersect_area = intersect_wh[..., 0] * intersect_wh[..., 1]
+    b_true_area = b_true_wh[..., 0] * b_true_wh[..., 1]
+    b_pred_area = b_pred_wh[..., 0] * b_pred_wh[..., 1]
+    union_area = b_true_area + b_pred_area - intersect_area
+    # calculate IoU, add epsilon in denominator to avoid dividing by 0
+    iou = intersect_area / (union_area + K.epsilon())
 
-        _, iou = self.iou(box_true,box_pred)
+    # get enclosed area
+    enclose_mins = K.minimum(b_true_mins, b_pred_mins)
+    enclose_maxes = K.maximum(b_true_maxes, b_pred_maxes)
+    enclose_wh = K.maximum(enclose_maxes - enclose_mins, 0.0)
+    enclose_area = enclose_wh[..., 0] * enclose_wh[..., 1]
+    # calculate GIoU, add epsilon in denominator to avoid dividing by 0
+    giou = iou - 1.0 * (enclose_area - union_area) / (enclose_area + K.epsilon())
+    giou = K.expand_dims(giou, -1)
 
-        # find enclosed area
-        enclose_left_up = tf.minimum(box_true[..., :2], box_pred[..., :2])
-        enclose_right_down = tf.maximum(box_true[..., 2:], box_pred[..., 2:])
+    return giou
 
-        enclose_wh = enclose_right_down - enclose_left_up
-        c2 = tf.square(enclose_wh[..., 0]) + tf.square(enclose_wh[..., 1])
 
-        box_true_center_x = (box_true[..., 0] + box_true[..., 2]) / 2
-        box_true_center_y = (box_true[..., 1] + box_true[..., 3]) / 2
-        box_pred_center_x = (box_pred[..., 0] + box_pred[..., 2]) / 2
-        box_pred_center_y = (box_pred[..., 1] + box_pred[..., 3]) / 2
+def box_diou(b_true, b_pred, use_ciou=False):
+    """
+    Calculate DIoU/CIoU loss on anchor boxes
+    Reference Paper:
+        "Distance-IoU Loss: Faster and Better Learning for Bounding Box Regression"
+        https://arxiv.org/abs/1911.08287
+    Parameters
+    ----------
+    b_true: GT boxes tensor, shape=(batch, feat_w, feat_h, anchor_num, 4), xywh
+    b_pred: predict boxes tensor, shape=(batch, feat_w, feat_h, anchor_num, 4), xywh
+    use_ciou: bool flag to indicate whether to use CIoU loss type
+    Returns
+    -------
+    diou: tensor, shape=(batch, feat_w, feat_h, anchor_num, 1)
+    """
+    b_true_xy = b_true[..., :2]
+    b_true_wh = b_true[..., 2:4]
+    b_true_wh_half = b_true_wh/2.
+    b_true_mins = b_true_xy - b_true_wh_half
+    b_true_maxes = b_true_xy + b_true_wh_half
 
-        d = tf.square(box_true_center_x - box_pred_center_x) + tf.square(box_true_center_y - box_pred_center_y)
+    b_pred_xy = b_pred[..., :2]
+    b_pred_wh = b_pred[..., 2:4]
+    b_pred_wh_half = b_pred_wh/2.
+    b_pred_mins = b_pred_xy - b_pred_wh_half
+    b_pred_maxes = b_pred_xy + b_pred_wh_half
 
-        diou = iou - tf.math.divide_no_nan(d, c2)
+    intersect_mins = K.maximum(b_true_mins, b_pred_mins)
+    intersect_maxes = K.minimum(b_true_maxes, b_pred_maxes)
+    intersect_wh = K.maximum(intersect_maxes - intersect_mins, 0.)
+    intersect_area = intersect_wh[..., 0] * intersect_wh[..., 1]
+    b_true_area = b_true_wh[..., 0] * b_true_wh[..., 1]
+    b_pred_area = b_pred_wh[..., 0] * b_pred_wh[..., 1]
+    union_area = b_true_area + b_pred_area - intersect_area
+    # calculate IoU, add epsilon in denominator to avoid dividing by 0
+    iou = intersect_area / (union_area + K.epsilon())
 
-        return diou
+    # box center distance
+    center_distance = K.sum(K.square(b_true_xy - b_pred_xy), axis=-1)
+    # get enclosed area
+    enclose_mins = K.minimum(b_true_mins, b_pred_mins)
+    enclose_maxes = K.maximum(b_true_maxes, b_pred_maxes)
+    enclose_wh = K.maximum(enclose_maxes - enclose_mins, 0.0)
+    # get enclosed diagonal distance
+    enclose_diagonal = K.sum(K.square(enclose_wh), axis=-1)
+    # calculate DIoU, add epsilon in denominator to avoid dividing by 0
+    diou = iou - 1.0 * (center_distance) / (enclose_diagonal + K.epsilon())
 
-    def ciou(self, box_true, box_pred):
-        diou = self.diou(box_true, box_pred)
-        _, iou = self.iou(box_true, box_pred)
-
-        box_true_w, box_true_h = box_true[..., 2] - box_true[..., 0], box_true[..., 3] - box_true[..., 1]
-        box_pred_w, box_pred_h = box_pred[..., 2] - box_pred[..., 0], box_pred[..., 3] - box_pred[..., 1]
+    if use_ciou:
+        box_true_w, box_true_h = b_true[..., 2] - b_true[..., 0], b_true[..., 3] - b_true[..., 1]
+        box_pred_w, box_pred_h = b_pred[..., 2] - b_pred[..., 0], b_pred[..., 3] - b_pred[..., 1]
 
         atan = tf.atan(tf.math.divide_no_nan(box_true_w, box_true_h)) - tf.atan(tf.math.divide_no_nan(box_pred_w, box_pred_h))
         v = (atan * 2 / np.pi) ** 2
-        alpha = tf.stop_gradient(tf.math.divide_no_nan(v, 1 - iou + v))
+        alpha = tf.stop_gradient(tf.math.divide_no_nan(v, 1.0 - iou + v))
         
-        ciou = diou - alpha * v
+        diou = diou - alpha * v
 
-        return ciou
+        """
+        # calculate param v and alpha to extend to CIoU
+        v = 4*K.square(tf.math.atan2(b_true_wh[..., 0], b_true_wh[..., 1]) - tf.math.atan2(b_pred_wh[..., 0], b_pred_wh[..., 1])) / (math.pi * math.pi)
 
-    def focal_loss(self, y_true, y_pred, gamma=2.0, alpha=0.25, label_smoothing=0):
-        sigmoid_loss = binary_crossentropy(y_true, y_pred, label_smoothing=label_smoothing)
-        sigmoid_loss = tf.expand_dims(sigmoid_loss, axis=-1)
+        # a trick: here we add an non-gradient coefficient w^2+h^2 to v to customize it's back-propagate,
+        #          to match related description for equation (12) in original paper
+        #
+        #
+        #          v'/w' = (8/pi^2) * (arctan(wgt/hgt) - arctan(w/h)) * (h/(w^2+h^2))          (12)
+        #          v'/h' = -(8/pi^2) * (arctan(wgt/hgt) - arctan(w/h)) * (w/(w^2+h^2))
+        #
+        #          The dominator w^2+h^2 is usually a small value for the cases
+        #          h and w ranging in [0; 1], which is likely to yield gradient
+        #          explosion. And thus in our implementation, the dominator
+        #          w^2+h^2 is simply removed for stable convergence, by which
+        #          the step size 1/(w^2+h^2) is replaced by 1 and the gradient direction
+        #          is still consistent with Eqn. (12).
+        v = v * tf.stop_gradient(b_pred_wh[..., 0] * b_pred_wh[..., 0] + b_pred_wh[..., 1] * b_pred_wh[..., 1])
 
-        p_t = ((y_true * y_pred) + ((1 - y_true) * (1 - y_pred)))
-        modulating_factor = tf.pow(1.0 - p_t, gamma)
-        alpha_weight_factor = (y_true * alpha + (1 - y_true) * (1 - alpha))
+        alpha = v / (1.0 - iou + v)
+        diou = diou - alpha*v
+        """
 
-        sigmoid_focal_loss = modulating_factor * alpha_weight_factor * sigmoid_loss
 
-        sigmoid_focal_loss = tf.reduce_sum(sigmoid_focal_loss, axis=-1)
+    diou = K.expand_dims(diou, -1)
+    return diou
 
-        return sigmoid_focal_loss
 
-    def compute_loss(self, y_true, y_pred):
-        box_pred, obj_pred, class_pred, raw_box_pred = decode_predictions(y_pred, self.valid_anchors)
+def _smooth_labels(y_true, label_smoothing):
+    label_smoothing = K.constant(label_smoothing, dtype=K.floatx())
+    return y_true * (1.0 - label_smoothing) + 0.5 * label_smoothing
 
-        xy_true, wh_true, obj_true, class_true = self.get_true_scores(y_true)
-        box_true = tf.concat([xy_true - wh_true/2.0, xy_true + wh_true/2.0], axis=-1)
-        
-        class_true = self.label_smoothing(class_true)
-        weights = 2 - wh_true[..., 0] * wh_true[..., 1]
 
-        # in order to element-wise multiply the result from tf.reduce_sum
-        # we need to squeeze one dimension for objectness here
-        obj_mask = tf.squeeze(obj_true, axis=-1)
-        
-        best_iou, _, _ = tf.map_fn(
-            lambda x: (tf.reduce_max(self.broadcast_iou(tf.boolean_mask(
-                x[1], tf.cast(x[2], tf.bool)), x[0]), axis=-1), 0, 0),
-            (box_pred, box_true, obj_mask))
-        ignore_mask = tf.cast(best_iou < self.iou_threshold, tf.float32)
+def yolo3_loss(args, anchors,
+            num_classes, 
+            anchor_masks='custom',
+            num_layers=3,
+            ignore_thresh=.5, 
+            label_smoothing=0, 
+            elim_grid_sense=False, 
+            use_vf_loss=False, 
+            use_focal_loss=True, 
+            use_focal_obj_loss=True,
+            use_giou_loss=False, 
+            use_diou_loss=True,
+            use_ciou_loss=False,
+            focal_gamma=4.3):
+    '''
+    YOLOv3 loss function.
+    Parameters
+    ----------
+    yolo_outputs: list of tensor, the output of yolo_body or tiny_yolo_body
+    y_true: list of array, the output of preprocess_true_boxes
+    anchors: array, shape=(N, 2), wh
+    num_classes: integer
+    ignore_thresh: float, the iou threshold whether to ignore object confidence loss
+    Returns
+    -------
+    loss: tensor, shape=(1,)
+    '''
+    yolo_outputs = args[:num_layers][::-1]
+    y_true = args[num_layers:][::-1]
 
-        
-        if self.use_focal_obj_loss:
-            confidence_loss = self.focal_loss(obj_true, obj_pred)
+    if num_layers == 3:
+        if anchor_masks == 'custom':
+            anchor_mask = [[9], [8,7], [0,1,2,3,4,5,6]]
         else:
-            confidence_loss = binary_crossentropy(obj_true, obj_pred)
-            confidence_loss = obj_mask * confidence_loss + (1 - obj_mask) * ignore_mask * confidence_loss
+            anchor_mask = [[6,7,8], [3,4,5], [0,1,2]]
+        grid_size = 32
+        scale_x_y = [1.05, 1.1, 1.2] if elim_grid_sense else [None, None, None]
+    else:
+        #anchor_mask = [[3,4,5], [0,1,2]]
+        #grid_size = 16
+        #scale_x_y = [1.05, 1.05] if elim_grid_sense else [None, None]
+        anchor_mask = [[0,1,2,3,4,5,6]]
+        grid_size = 4
+        scale_x_y = [1.05] if elim_grid_sense else [None, None]
 
-        if self.use_focal_loss:
-            class_loss = self.focal_loss(class_true, class_pred)
+    input_shape = K.cast(K.shape(yolo_outputs[0])[1:3] * grid_size, K.dtype(y_true[0]))
+    grid_shapes = [K.cast(K.shape(yolo_outputs[i])[1:3], K.dtype(y_true[0])) for i in range(num_layers)]
+    loss = 0
+    total_location_loss = 0
+    total_confidence_loss = 0
+    total_class_loss = 0
+    batch_size = K.shape(yolo_outputs[0])[0] # batch size, tensor
+    batch_size_f = K.cast(batch_size, K.dtype(yolo_outputs[0]))
+
+    for i in range(num_layers):
+        object_mask = y_true[i][..., 4:5]
+        true_class_probs = y_true[i][..., 5:]
+        if label_smoothing:
+            true_class_probs = _smooth_labels(true_class_probs, label_smoothing)
+            true_objectness_probs = _smooth_labels(object_mask, label_smoothing)
         else:
-            class_loss = obj_mask * self.weighted_cetegorical_crossentropy(class_true, class_pred)
+            true_objectness_probs = object_mask
 
-        # box loss
-        if self.use_giou:
-            giou = self.giou(box_true, box_pred)
-            box_loss = obj_mask * weights * (1 - giou)
-            box_loss = tf.reduce_sum(box_loss, axis=(1, 2, 3))
-        elif self.use_ciou:
-            ciou = self.ciou(box_true, box_pred)
-            box_loss = obj_mask * weights * (1 - ciou)
-            box_loss = tf.reduce_sum(box_loss, axis=(1, 2, 3))
-        elif self.use_diou:
-            diou = self.diou(box_true, box_pred)
-            box_loss = obj_mask * weights * (1 - diou)
-            box_loss = tf.reduce_sum(box_loss, axis=(1, 2, 3))
+        grid, raw_pred, pred_xy, pred_wh = yolo3_decode(yolo_outputs[i],
+             anchors[anchor_mask[i]], num_classes, input_shape, scale_x_y=scale_x_y[i], calc_loss=True)
+        pred_box = K.concatenate([pred_xy, pred_wh])
+
+        # Darknet raw box to calculate loss.
+        raw_true_xy = y_true[i][..., :2]*grid_shapes[i][::-1] - grid
+        raw_true_wh = K.log(y_true[i][..., 2:4] / anchors[anchor_mask[i]] * input_shape[::-1])
+        raw_true_wh = K.switch(object_mask, raw_true_wh, K.zeros_like(raw_true_wh)) # avoid log(0)=-inf
+        box_loss_scale = 2 - y_true[i][...,2:3]*y_true[i][...,3:4]
+
+        # Find ignore mask, iterate over each of batch.
+        ignore_mask = tf.TensorArray(K.dtype(y_true[0]), size=1, dynamic_size=True)
+        object_mask_bool = K.cast(object_mask, 'bool')
+        def loop_body(b, ignore_mask):
+            true_box = tf.boolean_mask(y_true[i][b,...,0:4], object_mask_bool[b,...,0])
+            iou = box_iou(pred_box[b], true_box)
+            best_iou = K.max(iou, axis=-1)
+            ignore_mask = ignore_mask.write(b, K.cast(best_iou<ignore_thresh, K.dtype(true_box)))
+            return b+1, ignore_mask
+        _, ignore_mask = tf.while_loop(lambda b,*args: b<batch_size, loop_body, [0, ignore_mask])
+        ignore_mask = ignore_mask.stack()
+        ignore_mask = K.expand_dims(ignore_mask, -1)
+
+        if use_focal_obj_loss:
+            # Focal loss for objectness confidence
+            confidence_loss = sigmoid_focal_loss(true_objectness_probs, raw_pred[...,4:5], gamma=focal_gamma)
         else:
-            # traditional loss for xy and wh
-            pred_xy = raw_box_pred[..., 0:2]
-            pred_wh = raw_box_pred[..., 2:4]
+            confidence_loss = object_mask * K.binary_crossentropy(true_objectness_probs, raw_pred[...,4:5], from_logits=True)+ \
+                (1-object_mask) * K.binary_crossentropy(object_mask, raw_pred[...,4:5], from_logits=True) * ignore_mask
 
-            # invert box equation
-            true_xy, true_wh = self.interpret_true_boxes(y_true)
+        if use_focal_loss:
+            # Focal loss for classification score
+            class_loss = sigmoid_focal_loss(true_class_probs, raw_pred[...,5:], gamma=focal_gamma)
+        elif use_vf_loss:
+            class_loss = varifocal_loss(true_class_probs, raw_pred[...,5:], gamma=focal_gamma)
+        else:
+            # use sigmoid style classification output
+            class_loss = object_mask * K.binary_crossentropy(true_class_probs, raw_pred[...,5:], from_logits=True)
 
-            # sum squared box loss
-            xy_loss = obj_mask * weights * \
-                      tf.reduce_sum(tf.square(true_xy - pred_xy), axis=-1)
-            wh_loss = obj_mask * weights * \
-                      tf.reduce_sum(tf.square(true_wh - pred_wh), axis=-1)
 
-            xy_loss = tf.reduce_sum(xy_loss, axis=(1, 2, 3))
-            wh_loss = tf.reduce_sum(wh_loss, axis=(1, 2, 3))
-            box_loss = xy_loss + wh_loss
+        if use_giou_loss:
+            # Calculate GIoU loss as location loss
+            raw_true_box = y_true[i][...,0:4]
+            giou = box_giou(raw_true_box, pred_box)
+            giou_loss = object_mask * box_loss_scale * (1 - giou)
+            giou_loss = K.sum(giou_loss) / batch_size_f
+            location_loss = giou_loss
+        elif use_diou_loss or use_ciou_loss:
+            # Calculate DIoU loss as location loss
+            raw_true_box = y_true[i][...,0:4]
+            diou = box_diou(raw_true_box, pred_box, use_ciou=use_ciou_loss)
+            diou_loss = object_mask * box_loss_scale * (1 - diou)
+            diou_loss = K.sum(diou_loss) / batch_size_f
+            location_loss = diou_loss
+        else:
+            # Standard YOLOv3 location loss
+            # K.binary_crossentropy is helpful to avoid exp overflow.
+            xy_loss = object_mask * box_loss_scale * K.binary_crossentropy(raw_true_xy, raw_pred[...,0:2], from_logits=True)
+            wh_loss = object_mask * box_loss_scale * 0.5 * K.square(raw_true_wh-raw_pred[...,2:4])
+            xy_loss = K.sum(xy_loss) / batch_size_f
+            wh_loss = K.sum(wh_loss) / batch_size_f
+            location_loss = xy_loss + wh_loss
 
-        # sum of all loss
-        confidence_loss = tf.reduce_sum(confidence_loss, axis=(1, 2, 3))
-        class_loss = tf.reduce_sum(class_loss, axis=(1, 2, 3))
+        # only involve class loss for multiple classes
+        if num_classes == 1:
+            class_loss = K.constant(0)
+        else:
+            class_loss = K.sum(class_loss) / batch_size_f
+        confidence_loss = K.sum(confidence_loss) / batch_size_f
+        loss += location_loss + confidence_loss + class_loss
+        total_location_loss += location_loss
+        total_confidence_loss += confidence_loss
+        total_class_loss += class_loss
 
-        return box_loss + confidence_loss + class_loss
+    # Fit for tf 2.0.0 loss shape
+    loss = K.expand_dims(loss, axis=-1)
 
-    def call(self, y_true, y_pred):
-
-        loss = self.compute_loss(y_true, y_pred)
-
-        return loss
+    return loss, total_location_loss, total_confidence_loss, total_class_loss

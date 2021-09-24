@@ -2,7 +2,11 @@ import tensorflow as tf
 import random
 import requests
 
-EMOJIS = ['&#128052', '&#128017', '&#128042', '&#128024', '&#128036', '&#128039', '&#129417', '&#128011', '&#128044', '&#128009', '&#128025', '&#129419','&#129409', '&#128030','&#128042','&#128053', '&#128054', '&#129418', '&#129437', '&#128049', '&#129412', '&#129427', '&#129428', '&#128013', '&#129430']
+EMOJIS = ['&#128052', '&#128017', '&#128042', '&#128024', '&#128036', '&#128039', 
+        '&#129417', '&#128011', '&#128044', '&#128009', '&#128025', '&#129419',
+        '&#129409', '&#128030', '&#128042', '&#129413', '&#129414', '&#129416',
+        '&#129408', '&#128032', '&#128033', '&#128375', '&#128010', '&#128330',
+        '&#128060', '&#129423', '&#128023', '&#129412', '&#128041', '&#129421']
 
 class TelegramCallback(tf.keras.callbacks.Callback):
     def __init__(self, epoch_interval=10, info_file='callbacks/credentials.txt'):
@@ -25,11 +29,13 @@ class TelegramCallback(tf.keras.callbacks.Callback):
                 data={'chat_id': chat_id, 'text':msg, 'parse_mode': 'HTML'})
 
     def on_epoch_end(self, epoch, logs):
+        print(logs)
         if epoch % self.epoch_interval == 0:
             msg = '<pre>' + f'Report at epoch {epoch} {self.emoji}:'
             msg += '\n' + 33 * '-' + "\n|{:^19s}|{:^11s}|".format('Metric', 'Value')
             msg += '\n' + 33 * '-'
             for key in logs:
+                print(key)
                 msg += "\n|{:^19s}|{:^11.4g}|".format(key, logs[key])
             for chat_id in self.chat_ids:
                 requests.post(url=self.url,

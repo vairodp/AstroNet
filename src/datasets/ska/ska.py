@@ -3,7 +3,10 @@
 import os
 import json
 import pandas as pd
+import numpy as np
+import tensorflow as tf
 import tensorflow_datasets as tfds
+from astropy.io import fits
 
 from configs.train_config import IMG_SIZE
 from data_prep import newDivideImages
@@ -34,10 +37,12 @@ _ANNOTATIONS_B5_1000h = 'https://owncloud.ia2.inaf.it/index.php/s/Y5CIa5V3QiBu1M
 
 # TODO(ska_dataset): Markdown description  that will appear on the catalog page.
 _DESCRIPTION = """
-Description is **formatted** as markdown.
-
-It should also contain any processing which has been applied (if any),
-(e.g. corrupted example skipped, images cropped,...):
+The SKA Science Data Challenge #1 (SDC1) release consists of 9 files, 
+with the format of FITS images. Each file is a simulated SKA continuum image 
+in total intensity of the same field at 3 frequencies (560 MHz, representative 
+of SKA Mid Band 1, 1.4 GHz, representative of SKA Mid Band 2 and 9.2 GHz, 
+representative of SKA Mid Band 5) and 3 telescope integrations (8, 100, 1000 h 
+as representative of a single, medium-depth and deep integration, respectively).
 """
 
 _CITATION = """
@@ -68,7 +73,8 @@ class SKA(tfds.core.GeneratorBasedBuilder):
         description=_DESCRIPTION,
         features=tfds.features.FeaturesDict({
             # These are the features of your dataset like images, labels ...
-            'image': tfds.features.Image(shape=(IMG_SIZE, IMG_SIZE, 3)),
+            #'image': tfds.features.Image(shape=(IMG_SIZE, IMG_SIZE, 1)),
+            'image': tfds.features.Tensor(shape=(IMG_SIZE,IMG_SIZE), dtype=tf.float64),
             'image/filename' : tfds.features.Text(),
             'objects': tfds.features.Sequence({
                 'bbox': tfds.features.BBoxFeature(),
@@ -115,15 +121,17 @@ class SKA(tfds.core.GeneratorBasedBuilder):
 
   def _generate_examples(self, path):
     """Yields examples."""
-    folders = ['B1_1000h', 'B2_1000h', 'B5_1000h']
+    folders = ['B1_1000h', 'B2_1000h']
     for folder in folders:
       folder_path = path / folder
-      print(folder_path._path_str)
-      for img_path in folder_path.glob('*.png'):
-        yield img_path.name, {
-            'image': img_path,
-            'image/filename': img_path.name,
-            'objects': self._generate_galaxies(folder_path._path_str, img_path.name)
+      #for img_path in folder_path.glob('*.fits'):
+      for img_path in [img for img in os.listdir(folder_path._path_str) if img.endswith('.fits')]:
+        fits_data = fits.open(folder_path._path_str + '/' + img_path)
+        fits_data = fits_data[0].data.astype(np.float64)
+        yield img_path, {
+            'image': fits_data,
+            'image/filename': img_path,
+            'objects': self._generate_galaxies(folder_path._path_str, img_path)
           }
 
   def _generate_galaxies(self, folder_path, img_path):

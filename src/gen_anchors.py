@@ -40,7 +40,7 @@ def avg_IOU(X,centroids):
 def write_anchors_to_file(centroids,X,anchor_file, grid_size):
     f = open(anchor_file,'w')
     
-    anchors = centroids.copy()
+    anchors = centroids.copy()*128
     print(anchors.shape)
 
     #for i in range(anchors.shape[0]):
@@ -54,10 +54,10 @@ def write_anchors_to_file(centroids,X,anchor_file, grid_size):
     print('Anchors = ', anchors[sorted_indices])
         
     for i in sorted_indices[:-1]:
-        f.write('%0.2f,%0.2f, '%(anchors[i,0],anchors[i,1]))
+        f.write('%0.2f,%0.2f, '%(int(anchors[i,0]),int(anchors[i,1])))
 
     #there should not be comma after last anchor, that's why
-    f.write('%0.2f,%0.2f\n'%(anchors[sorted_indices[-1:],0],anchors[sorted_indices[-1:],1]))
+    f.write('%0.2f,%0.2f\n'%(int(anchors[sorted_indices[-1:],0]),int(anchors[sorted_indices[-1:],1])))
     
     f.write('%f\n'%(avg_IOU(X,centroids)))
     print()

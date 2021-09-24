@@ -2,7 +2,8 @@ import numpy as np
 import tensorflow as tf
 import cv2
 
-from configs.train_config import loss_params, SCORE_THRESHOLD, MAX_NUM_BBOXES
+from configs.train_config import loss_params, SCORE_THRESHOLD, MAX_NUM_BBOXES, NUM_CLASSES
+from loss import yolo3_decode
 
 def bbox_to_x1y1x2y2(bbox):
     # bbox = [x, y, w, h] --> bbox = [x1, y1, x2, y2]
@@ -117,27 +118,16 @@ def old_nms(inputs, anchors, anchor_masks):
     return bboxes, scores, classes, valid_detections
 '''
 
-def decode_predictions(pred, anchors):
-    # pred: (batch_size, grid, grid, anchors, (x, y, w, h, obj, ...classes))
-    grid_size = tf.shape(pred)[1]
-    box_xy, box_wh, objectness, class_probs = tf.split(pred, (2, 2, 1, -1), axis=-1)
+def decode_predictions(pred, anchors, input_shape):
+    prediction = yolo3_decode(pred, anchors,
+        NUM_CLASSES, input_shape, scale_x_y=None, calc_loss=False)
+    box_xy, box_wh, box_confidence, box_class_probs = prediction
+    bbox = tf.concat([box_xy, box_wh], axis=-1)
+    print(tf.shape(bbox))
+    bbox = bbox_to_x1y1x2y2(bbox)
+    prediction = [bbox, box_confidence, box_class_probs]
 
-    box_xy = loss_params["sensitivity_factor"] * tf.sigmoid(box_xy)
-    objectness = tf.sigmoid(objectness)
-    class_probs = tf.sigmoid(class_probs)
-    box = tf.concat([box_xy, box_wh], axis=-1)
-
-    grid = tf.meshgrid(tf.range(grid_size), tf.range(grid_size))
-    grid = tf.expand_dims(tf.stack(grid, axis=-1), axis=2)
-
-    box_xy = (box_xy + tf.cast(grid, tf.float32)) / tf.cast(grid_size, tf.float32)
-    box_wh = tf.exp(box_wh) * anchors
-
-    box_x1y1 = box_xy - box_wh / 2
-    box_x2y2 = box_xy + box_wh / 2
-    bbox = tf.concat([box_x1y1, box_x2y2], axis=-1)
-
-    return bbox, objectness, class_probs, box
+    return prediction
 
 
 def flatten_output(outputs):
@@ -151,6 +141,9 @@ def flatten_output(outputs):
 def draw_outputs(img, boxes, objectness, classes, nums):
     
     print(boxes)
+    print('NUMS', nums)
+    print(nums[0])
+    print(classes)
     
     boxes, objectness, classes, nums = boxes[0], objectness[0], classes[0], nums[0]
     boxes=np.array(boxes)
@@ -161,10 +154,10 @@ def draw_outputs(img, boxes, objectness, classes, nums):
         print(x1y1)
         print(x2y2)
         
-        img = cv2.rectangle(img, (x1y1), (x2y2), (255,0,0), 2)
+        img = cv2.rectangle(img, (x1y1), (x2y2), (255,0,0), 1)
         
-        img = cv2.putText(img, '{} {:.4f}'.format(
-            "test", objectness[i]),
-                          (x1y1), cv2.FONT_HERSHEY_PLAIN, 1, (0, 0, 255), 2)
+        #img = cv2.putText(img, '{} {:.4f}'.format(
+        #    "test", objectness[i]),
+        #                  (x1y1), cv2.FONT_HERSHEY_PLAIN, 1, (0, 0, 255), 2)
     
     return img

@@ -1,6 +1,5 @@
 import os
 from anchors import YOLOV4_ANCHORS
-
 import tensorflow as tf
 import tensorflow_datasets as tfds
 import numpy as np
@@ -21,25 +20,36 @@ from configs.train_config import MAX_NUM_BBOXES, NUM_CLASSES
 
 from anchors import compute_normalized_anchors, YOLOV4_ANCHORS
 
+MAX_BOXES = 100
+
 SPLITS = {
     'train': 'train[:80%]',
     'validation': 'train[80%:90%]',
     'test': 'train[-10%:]'
 }
 
-class SKADataset:
-    def __init__(self, mode='train', grid_size=32, anchors=YOLOV4_ANCHORS, anchor_masks=np.array([[0, 1, 2], [3, 4, 5], [6, 7, 8]])):
+class ConvoSKA:
+    def __init__(self, mode='train'):
         self.mode = mode
-        data_dir = "../data"
-        download_dir = data_dir + "/raw"
-        self.grid_size = grid_size
+        self.data_dir = "../data"
+        self.download_dir = self.data_dir + "/raw"
         self.dataset = tfds.load('ska', split=SPLITS[mode],
-                                data_dir=data_dir,
-                                #download=False,
-                                download_and_prepare_kwargs={'download_dir': download_dir})
-        anchors_temp = compute_normalized_anchors(anchors, (IMG_SIZE, IMG_SIZE, 3))
-        self.anchors= np.array([anchor for subl in anchors_temp for anchor in subl])
-        self.anchor_masks = anchor_masks
+                                data_dir=self.data_dir,
+                                download_and_prepare_kwargs={'download_dir': self.download_dir})
+        self.weights = self.get_class_weights()
+
+    def get_class_weights(self):
+        dataset = tfds.load('ska', split=SPLITS['train'],
+                                data_dir=self.data_dir,
+                                download_and_prepare_kwargs={'download_dir': self.download_dir})
+        labels = dataset.map(self.create_mask)
+        masks = []
+        for mask in labels:
+            masks.append(mask['label'])
+        masks = np.ravel(masks)
+        weights = compute_class_weight(class_weight='balanced', classes=np.unique(masks), y=masks)
+        weights = weights.astype(np.float32)
+        return weights
 
     def transform_bbox(self, bbox):
         # bbox = [ymin, xmin, ymax, xmax] ---> [x, y, width, height]
@@ -58,55 +68,21 @@ class SKADataset:
         # bbox = [x, y, width, height] values in [0, IMG_SIZE]
         bbox = np.clip(bbox, a_min=0.0, a_max=1 - backend.epsilon())
 
-        grid_size = math.ceil(IMG_SIZE / self.grid_size)
+        ymins = np.rint(bbox[..., 0]*IMG_SIZE).astype(np.int32)
+        xmins = np.rint(bbox[..., 1]*IMG_SIZE).astype(np.int32)
+        ymaxs = np.rint(bbox[..., 2]*IMG_SIZE).astype(np.int32)
+        xmaxs = np.rint(bbox[..., 3]*IMG_SIZE).astype(np.int32)
+        #classes = np.zeros((MAX_BOXES, 3), dtype=np.float32) # classes one hot encoded + confidence
+        #coords = np.zeros((IMG_SIZE, IMG_SIZE, 1), dtype=np.float32) # sources + confidence
+        mask = np.zeros((IMG_SIZE, IMG_SIZE, 1), dtype=np.float32)
+        mask.fill(3.0)
+        for index, ymin, xmin, ymax, xmax, class_id in zip(tf.range(MAX_BOXES), ymins, xmins, ymaxs, xmaxs, label):
+            #classes[index][class_id] = 1
+            #coords[y_coord][x_coord] = 1
+            mask[ymin:ymax, xmin:xmax] = class_id
         
-        # find best anchor
-        anchor_area = self.anchors[..., 0] * self.anchors[..., 1]
-
-        box_wh = bbox[..., 2:4]
-        box_wh = np.tile(np.expand_dims(box_wh, -2), (1, 1, self.anchors.shape[0], 1))
-        box_area = box_wh[..., 0] * box_wh[..., 1]
-        intersection = np.minimum(box_wh[..., 0], self.anchors[..., 0]) * np.minimum(box_wh[..., 1],
-                                                                                     self.anchors[..., 1])
-        iou = intersection / (box_area + anchor_area - intersection)
-        #print(iou)
-        
-        anchor_idx = np.argmax(iou, axis=-1).reshape((-1))  # shape = (1, n) --> (n,)
-        #print(anchor_idx)
-
-        if len(self.anchor_masks) == 3:
-            label_small = self.yolo_label(bbox, label, self.anchor_masks[2], anchor_idx, grid_size)
-            label_medium = self.yolo_label(bbox, label, self.anchor_masks[1], anchor_idx, grid_size * 2)
-            label_large = self.yolo_label(bbox, label, self.anchor_masks[0], anchor_idx, grid_size * 4)
-        else:
-            label_small = tf.constant(0.0)
-            label_medium = tf.constant(0.0)
-            label_large = self.yolo_label(bbox, label, self.anchor_masks[0], anchor_idx, grid_size)
-
-        return label_small, label_medium, label_large
-
-    def yolo_label(self, bbox, label, anchor_masks, anchor_idx, grid_size):
-        # grids.shape: (grid_size, grid_size, 3, NUMCLASSES + 5)
-        grids = np.zeros((grid_size, grid_size, anchor_masks.shape[0], (5 + NUM_CLASSES)), dtype=np.float32)
-
-        for box, class_id, anchor_id in zip(bbox, label, anchor_idx):
-            if anchor_id in anchor_masks:
-                box = box[0:4]
-                box_xy = box[0:2]
-
-                grid_xy = (box_xy // (1 / grid_size)).astype(int)
-
-                box_index = np.where(anchor_masks == anchor_id)[0][0]
-
-                grid_array = np.zeros((5 + NUM_CLASSES))
-                grid_array[0:5] = np.append(box, [1])
-                class_index = int(5 + class_id)
-                grid_array[class_index] = 1
-
-                # grid[y][x][anchor] = [tx, ty, bw, bh, obj, ...class_id]
-                grids[grid_xy[1]][grid_xy[0]][box_index] = grid_array
-
-        return grids
+        #return coords, classes
+        return mask
         
     def get_dataset(self):
         data = self.dataset.map(self.map_features).shuffle(BUFFER_SIZE) 
@@ -126,12 +102,6 @@ class SKADataset:
         xmin = bbox[..., 1]
         ymax = bbox[..., 2]
         xmax = bbox[..., 3]
-        # h = ymax - ymin
-        # x_tl = xmin
-        # y_tl = ymin + h
-        # x_br = xmax
-        # y_br = ymax - h
-        #print(bbox)
         bbox = [BoundingBox(x1=x1, y1=y1, x2=x2, y2=y2) for y1, x1, y2, x2 in zip(ymin, xmin, ymax, xmax)]
         bbox = BoundingBoxesOnImage(bbox, shape=image.shape)
         #Apply augmenter to 50% of the images
@@ -142,13 +112,6 @@ class SKADataset:
 			    iaa.Flipud(0.5)   # vertically flip 50% of all images
             ]),
             sometimes(iaa.Rot90((1,3))),
-            #sometimes(iaa.TranslateX(px=(-20, 20))),
-            #sometimes(iaa.TranslateX(px=(-20, 20))),
-            #sometimes(iaa.Affine(scale=2.0)),
-            #sometimes(iaa.OneOf([
-            #    iaa.RemoveSaturation(1.0),
-            #    iaa.AddToHueAndSaturation((-50, 50), per_channel=True)
-            #]))
         ])
         image_aug, bbox_aug = seq(image=image, bounding_boxes=bbox)
 
@@ -162,12 +125,46 @@ class SKADataset:
     
     def aug_img(self, img):
         p_brightness = tf.random.uniform([], 0, 1.0, dtype=tf.float32)
-        if p_brightness >= 0.5:
+        p_constrast = tf.random.uniform([], 0, 1.0, dtype=tf.float32)
+        p_hue = tf.random.uniform([], 0, 1.0, dtype=tf.float32)
+        p_sat = tf.random.uniform([], 0, 1.0, dtype=tf.float32)
+        if p_brightness >= 0.3:
             img = tf.image.random_brightness(img, max_delta=0.25)
+        if p_constrast >= 0.3:
+            img = tf.image.random_contrast(img, lower=0.4, upper=1.3)
+        if p_hue >= 0.3:
+            img = tf.image.random_hue(img, max_delta=0.2)
+        if p_sat >= 0.3:
+            img = tf.image.random_saturation(img, lower=0, upper=4)
         #plt.imshow(img)
         #plt.savefig(f'prova/img{datetime.now().strftime("%Y_%m_%d-%I-%M-%S_%p")}.png')
         return img
 
+    def add_sample_weights(self, label):
+        # The weights for each class, with the constraint that:
+        #     sum(class_weights) == 1.0
+        #class_weights = tf.numpy_function(self.get_class_weights, inp=[], Tout=tf.float32)
+        class_weights = tf.constant(self.weights)
+        class_weights = class_weights/tf.reduce_sum(class_weights)
+
+        # Create an image of `sample_weights` by using the label at each pixel as an 
+        # index into the `class weights` .
+        sample_weights = tf.gather(class_weights, indices=tf.cast(label, tf.int32))
+
+        return sample_weights
+    
+    def create_mask(self, feature):
+        # limit the number of bounding box and label
+        bbox = feature["objects"]["bbox"]
+
+        #coords, classes = tf.numpy_function(self.map_label, inp=[bbox, feature['objects']['label']], Tout=[tf.float32, tf.float32])
+        mask = tf.numpy_function(self.map_label, inp=[bbox, feature['objects']['label']], Tout=tf.float32)
+
+        feature_dict = {
+            "label": mask
+        }
+
+        return feature_dict
 
     def map_features(self,feature):
         
@@ -175,44 +172,35 @@ class SKADataset:
 
         # limit the number of bounding box and label
         bbox = feature["objects"]["bbox"]
-        #bbox = bbox[:MAX_NUM_BBOXES]
 
-        image = tf.expand_dims(image, axis=-1)
-
-        if self.mode == 'train':
+        #if self.mode == 'train':
             #image, bbox = tf.numpy_function(self.augment_image_and_bbox, inp=[image, bbox], Tout=[tf.uint8, tf.float32])
-            image = self.aug_img(image)
+            #image = self.aug_img(image)]
             
 
         num_of_bbox = tf.shape(bbox)[0]
-        #label = tf.zeros(num_of_bbox, dtype=tf.int32)
-        #label = label[:MAX_NUM_BBOXES]
 
-        bbox = tf.numpy_function(self.transform_bbox, inp=[bbox], Tout=tf.float32)
+        #coords, classes = tf.numpy_function(self.map_label, inp=[bbox, feature['objects']['label']], Tout=[tf.float32, tf.float32])
+        mask = tf.numpy_function(self.map_label, inp=[bbox, feature['objects']['label']], Tout=tf.float32)
 
-        label_small, label_medium, label_large = tf.numpy_function(self.map_label, inp=[bbox, feature['objects']['label']],
-                                                                   Tout=[tf.float32, tf.float32, tf.float32])
-        # normalize to [-1, 1]
-        #image = tf.cast(image, tf.float32)
-        #image = image / 127.5 - 1.0
-        #image = image / 255.0
-        print(tf.math.reduce_std(image))
+        sample_weights = self.add_sample_weights(mask)
+
+        #coords.set_shape([IMG_SIZE, IMG_SIZE, 1])
+        #classes.set_shape([MAX_NUM_BBOXES, NUM_CLASSES])
+        mask.set_shape([IMG_SIZE, IMG_SIZE, 1])
+
         image = (image - tf.math.reduce_mean(image)) / tf.math.reduce_std(image)
-        
-        print(image.shape)
+        image = tf.expand_dims(image, axis=-1)
 
 
         bbox = self.concat_class(bbox, feature['objects']['label'])
         bbox = self.pad_bbox(bbox)
 
-        if len(self.anchor_masks) == 3:
-            final_label = (label_large, label_medium, label_small)
-        else:
-            final_label = (label_large)
 
         feature_dict = {
             "image": image,
-            "label": final_label,
+            "label": mask,
+            "weights": sample_weights,
             "bbox": bbox,
             "num_of_bbox": num_of_bbox
         }

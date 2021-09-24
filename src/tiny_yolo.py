@@ -5,7 +5,6 @@ from tensorflow.keras.layers import Concatenate, MaxPool2D, UpSampling2D
 from layers import cnn_block, csp_block, scale_prediction
 
 from configs.train_config import NUM_CLASSES, MAX_NUM_BBOXES, SCORE_THRESHOLD, loss_params
-from metrics.mean_ap import mAP
 from utils import decode_predictions, non_max_suppression
 
 from anchors import YOLOV4_ANCHORS, compute_normalized_anchors
@@ -162,8 +161,6 @@ def yolov3_head(
     )
 
     return tf.keras.Model([input_1, input_2, input_3], [output_1, output_2, output_3], name="YOLOv3_head")
-
-mAP_tracker = mAP(overlap_threshold=0.5, model='small_yolo', name='mAP_0.5')
 
 class TinyYOLOv4(tf.keras.Model):
     def __init__(self, input_shape, num_classes,

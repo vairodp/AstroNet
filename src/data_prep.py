@@ -2,11 +2,13 @@
 import pandas as pd
 import numpy as np
 import math
+import cv2
 
 #Astropy
 from astropy.io import fits
 import astropy.wcs as pywcs
 from astropy.nddata.utils import Cutout2D
+from astropy.stats import sigma_clipped_stats
 from astropy.io.fits.verify import VerifyWarning
 from configs.train_config import IMG_SIZE
 
@@ -25,7 +27,9 @@ from tqdm import tqdm
 #Globals Values
 # b1: KAPPA = 2, no power
 # b2: KAPPA = 2, power=1.2
-KAPPA = 2
+SIGMA = 3.5
+
+KAPPA = 3
 
 PRIMARY_BEAM_B1 = '../data/ancillary/PrimaryBeam_B1.fits'
 PRIMARY_BEAM_B2 = 'PrimaryBeam_B2.fits'
@@ -115,7 +119,7 @@ def plot_images_and_bbox(ax, img_array, category, centroid_x, centroid_y, xmin, 
 							facecolor='none')
 	ax.add_patch(center)
 	ax.add_patch(box)
-	ax.imshow(img_array, origin='lower')
+	ax.imshow(img_array, cmap='gist_heat')
 	ax.text(xmin,ymin,text,c=color)
 
 def _setup_pb(primary_beam_file):
@@ -134,6 +138,164 @@ def correct_primary_beam(training_set, pb_wcs, pb_data, x_pixel_res):
 		with np.errstate(divide='ignore', invalid='ignore'):
 			row['FLUX'] = np.nan_to_num(flux / area_pixel, posinf=0.0, neginf=0.0)
 	return training_set
+
+def clip(data, lim):
+    data[data < lim] = 0.0
+    return data 
+
+
+def getPerfectImages(img_path,expanded_set_path,filtered_set_path,cutouts_path,plot=False):
+
+	# Open image 
+	fits_img = fits.open(img_path)
+	fits_img = make_fits_2D(fits_img[0])
+
+	# Prepare Extended Set
+	FilteredSet = pd.read_csv(filtered_set_path, skiprows=17, delimiter='\s+')
+	FilteredSet = FilteredSet[FilteredSet.columns[0:15]]
+	FilteredSet.columns = ['ID', 'RA (core)', 'DEC (core)', 'RA (centroid)', 'DEC (centroid)','FLUX', 'Core frac', 'BMAJ', 'BMIN', 'PA', 'SIZE', 'CLASS', 'SELECTION', 'x', 'y']
+	FilteredSet['x'] = FilteredSet['x'].astype(int)
+	FilteredSet['y'] = FilteredSet['y'].astype(int)
+	FilteredSet['FLUX'] = FilteredSet['FLUX'].astype(float)
+
+	# Prepare Filtered Set
+	ExpandedSet = pd.read_csv(expanded_set_path, skiprows=17, delimiter='\s+')
+	ExpandedSet = ExpandedSet[ExpandedSet.columns[0:15]]
+	ExpandedSet.columns = ['ID', 'RA (core)', 'DEC (core)', 'RA (centroid)', 'DEC (centroid)',
+                        'FLUX', 'Core frac', 'BMAJ', 'BMIN', 'PA', 'SIZE', 'CLASS', 'SELECTION', 'x', 'y']
+	ExpandedSet['x'] = ExpandedSet['x'].astype(int)
+	ExpandedSet['y'] = ExpandedSet['y'].astype(int)
+	ExpandedSet['FLUX'] = ExpandedSet['FLUX'].astype(float)
+
+	Small_Expanded_Set = pd.concat([FilteredSet,ExpandedSet]).drop_duplicates(keep = False)
+
+	#Constants
+	X_PIXEL_RES = abs(fits_img.header['CDELT1'])
+	BMAJ_TOT = abs(fits_img.header['BMAJ'])
+	BMIN_TOT = abs(fits_img.header['BMIN'])
+	BMAJ_RATIO = BMAJ_TOT / X_PIXEL_RES
+	BMIN_RATIO = BMIN_TOT / X_PIXEL_RES
+	G_SQARED = (2 * X_PIXEL_RES * 3600) ** 2
+	WORLD_REF = pywcs.WCS(fits_img.header).deepcopy()
+	RANGE_MIN, RANGE_MAX = get_boundaries(FilteredSet['x'], FilteredSet['y'])
+
+	fits_img = fits_img.data[0,0]
+
+	rms = np.sqrt(np.mean(fits_img[RANGE_MIN:RANGE_MAX, RANGE_MIN:RANGE_MAX] ** 2))
+
+	FilteredSet = FilteredSet[FilteredSet['SELECTION'] == 1]
+	Small_Expanded_Set = Small_Expanded_Set[Small_Expanded_Set['SELECTION'] == 1]
+
+	fits_img[np.isnan(fits_img)] = 0
+
+	training_data = {
+		'class': [],
+		'img_path': [],
+		'xmax': [],
+		'xmin': [],
+		'ymax': [],
+		'ymin': []
+	}
+
+	for i in tqdm(range(RANGE_MIN, RANGE_MAX, IMG_SIZE), desc='Preparing images...'):
+		for j in range(RANGE_MIN, RANGE_MAX, IMG_SIZE):
+			#Query
+			pos = (i+(IMG_SIZE/2), j+(IMG_SIZE/2))
+			img_fits = Cutout2D(fits_img, position=pos,size=IMG_SIZE, wcs=WORLD_REF, copy=True)
+			img_array = img_fits.data
+			small_ts = FilteredSet.query('x < @i+@IMG_SIZE and x >= @i and y < @j+@IMG_SIZE and y >= @j')
+			
+			if len(small_ts) > 0:
+
+				expanded_ts = Small_Expanded_Set.query('x < @i+@IMG_SIZE and x >= @i and y < @j+@IMG_SIZE and y >= @j and FLUX > (@rms * @KAPPA) and SELECTION == 1')
+				
+				prefix_index = img_path.find('B')
+				prefix = img_path[prefix_index:prefix_index+2]
+				filename = f'{prefix}img-{i}-{j}.png'
+				#if 'B2' in img_path:
+				#	img_array = power(img_array, power_index=3.0, scale_min=0.0)
+				# Estimate stats
+				mean, median, std = sigma_clipped_stats(img_array, sigma=SIGMA)
+				# Clip off n sigma points
+				img_array = clip(img_array,std*SIGMA)
+				path_image = cutouts_path + filename
+				plt.imsave(path_image, img_array, origin='lower', cmap='gist_heat')
+
+				########## CV2 ##############
+
+				if len(expanded_ts) > 0:
+
+					img_n = cv2.imread(path_image)
+
+					for _, row in expanded_ts.iterrows():
+
+					
+						centroid_x = int(row['x']-i)
+						centroid_y = int(row['y']-j)
+						
+						#Box
+						major = (row['BMAJ'] / 3600 / X_PIXEL_RES) / 2
+						minor = (row['BMIN'] / 3600 / X_PIXEL_RES) / 2
+						phi = np.radians(row['PA'])
+
+						major,minor = adjustSemiAxes(major,minor,row.CLASS,row.SIZE, BMAJ_RATIO, BMIN_RATIO, G_SQARED)
+
+						#Crop Box around the corner if oversized 
+						xmin, ymin, xmax, ymax = ellipse_to_box(phi, major, minor, centroid_x, centroid_y)
+						xmin = max(xmin, 0)
+						ymin = max(ymin, 0)
+						xmax = min(xmax, IMG_SIZE-1)
+						ymax = min(ymax, IMG_SIZE-1)
+
+						start_point = (int(xmin),int(ymax))
+						end_point = (int(xmax),int(ymin))
+
+						image = cv2.rectangle(img_n,start_point,end_point,(255,0,0),-1)
+
+					cv2.imwrite(path_image, image)
+				
+				if plot:
+					_, ax = plt.subplots()
+
+				for _, row in small_ts.iterrows():
+
+					centroid_x = int(row['x']-i)
+					centroid_y = int(row['y']-j)
+					
+					#Box
+					major = (row['BMAJ'] / 3600 / X_PIXEL_RES) / 2
+					minor = (row['BMIN'] / 3600 / X_PIXEL_RES) / 2
+					phi = np.radians(row['PA'])
+
+					major,minor = adjustSemiAxes(major,minor,row.CLASS,row.SIZE, BMAJ_RATIO, BMIN_RATIO, G_SQARED)
+
+					#Crop Box around the corner if oversized 
+					xmin, ymin, xmax, ymax = ellipse_to_box(phi, major, minor, centroid_x, centroid_y)
+					xmin = max(xmin, 0)
+					ymin = max(ymin, 0)
+					xmax = min(xmax, IMG_SIZE-1)
+					ymax = min(ymax, IMG_SIZE-1)
+
+					training_data['img_path'].append(filename)
+					training_data['class'].append(row.CLASS - 1)
+					training_data['xmax'].append(xmax / IMG_SIZE)
+					training_data['xmin'].append(xmin / IMG_SIZE)
+					training_data['ymax'].append(ymax / IMG_SIZE)
+					training_data['ymin'].append(ymin / IMG_SIZE)
+					
+					if plot:
+						img_array = cv2.imread(path_image)
+						img_array = cv2.cvtColor(img_array, cv2.COLOR_BGR2RGB)
+						img_array = np.array(img_array)
+						plot_images_and_bbox(ax, img_array, row.CLASS, centroid_x, 
+											centroid_y, xmin, ymin, xmax, ymax)
+
+
+				if plot:
+					plt.show()
+
+	return
+
 
 #For now filters with the threshold but should works with everything I hope
 def newDivideImages(img_path, training_set_path, cutouts_path, plot=False):
@@ -197,7 +359,7 @@ def newDivideImages(img_path, training_set_path, cutouts_path, plot=False):
 	fits_img[np.isnan(fits_img)] = 0
 	#rms = np.sqrt(np.mean(fits_img[RANGE_MIN:RANGE_MAX, RANGE_MIN:RANGE_MAX] ** 2))
 	#rms = np.mean(fits_img[RANGE_MIN:RANGE_MAX, RANGE_MIN:RANGE_MAX])
-
+	
 	for i in tqdm(range(RANGE_MIN, RANGE_MAX, IMG_SIZE), desc='Preparing images...'):
 		for j in range(RANGE_MIN, RANGE_MAX, IMG_SIZE):
 			#Query
@@ -209,10 +371,20 @@ def newDivideImages(img_path, training_set_path, cutouts_path, plot=False):
 			if len(small_ts) > 0:
 				prefix_index = img_path.find('B')
 				prefix = img_path[prefix_index:prefix_index+2]
-				filename = f'{prefix}img-{i}-{j}.png'
+				filename = f'{prefix}img-{i}-{j}.fits'
 				#if 'B2' in img_path:
 				#	img_array = power(img_array, power_index=3.0, scale_min=0.0)
-				plt.imsave(cutouts_path + filename, img_array, origin='lower')
+				# Estimate stats
+				mean, median, std = sigma_clipped_stats(img_array, sigma=SIGMA)
+				# Clip off n sigma points
+				#img_array = normalize_to_pixel_values(img_array)
+				#img_array = sqrt(img_array, scale_min=0.0) NOT BAD!
+				img_array = clip(img_array, lim=std*SIGMA)
+				hdu = fits.PrimaryHDU(data=img_array, header=img_fits.wcs.to_header())
+				#img_array = histeq(img_array, num_bins=256)
+
+				#plt.imsave(cutouts_path + filename, img_array, cmap='gist_heat')
+				hdu.writeto(cutouts_path + filename, overwrite=True)
 				if plot:
 					_, ax = plt.subplots()
 				for _, row in small_ts.iterrows():
@@ -246,11 +418,13 @@ def newDivideImages(img_path, training_set_path, cutouts_path, plot=False):
 					training_data['ymin'].append(ymin / IMG_SIZE)
 					
 					if plot:
-						plot_images_and_bbox(ax, img_array, row.CLASS, centroid_x, 
+						img = fits.open(cutouts_path + filename)
+						img = img[0].data
+						plot_images_and_bbox(ax, img, row.CLASS, centroid_x, 
 											centroid_y, xmin, ymin, xmax, ymax)
-				
 			if plot:
 				plt.show()
+			
 	training_df = pd.DataFrame.from_dict(training_data)
 	training_df.to_csv(cutouts_path + 'galaxies.csv', index=False)
 	print("GLOBAL = ", global_count)
@@ -258,6 +432,12 @@ def newDivideImages(img_path, training_set_path, cutouts_path, plot=False):
 	print("COUNTERS: ", COUNTERS)
 
 	return
+
+def normalize_to_pixel_values(image):
+	min = np.min(image)
+	max = np.max(image)
+	new_image = ((image - min) / (max - min)) * 255
+	return new_image
 			
 def ellipse_to_box(phi, major, minor, x, y):
 	axis_ux = major * np.cos(phi)
@@ -284,6 +464,13 @@ def make_fits_2D(hdu):
 		del hdu.header[keyword]
 	return hdu
 
+
+def clahe(img, clip):
+    #contrast enhancement
+    clahe = cv2.createCLAHE(clipLimit=clip)
+    cl = clahe.apply(np.array(img*255, dtype=np.uint8))
+    return cl
+
 def power(inputArray, power_index=3.0, scale_min=None, scale_max=None):
 
 	imageData=np.array(inputArray, copy=True)
@@ -301,6 +488,208 @@ def power(inputArray, power_index=3.0, scale_min=None, scale_max=None):
 	imageData[indices1] = np.power((imageData[indices1] - scale_min), power_index)*factor
 
 	return imageData
+
+def sqrt(inputArray, scale_min=None, scale_max=None):
+	"""Performs sqrt scaling of the input numpy array.
+
+	@type inputArray: numpy array
+	@param inputArray: image data array
+	@type scale_min: float
+	@param scale_min: minimum data value
+	@type scale_max: float
+	@param scale_max: maximum data value
+	@rtype: numpy array
+	@return: image data array
+	
+	"""		
+    
+	print ("img_scale : sqrt")
+	imageData=np.array(inputArray, copy=True)
+	
+	if scale_min == None:
+		scale_min = imageData.min()
+	if scale_max == None:
+		scale_max = imageData.max()
+
+	imageData.clip(min=scale_min, max=scale_max)
+	imageData = imageData - scale_min
+	indices = np.where(imageData < 0)
+	imageData[indices] = 0.0
+	imageData = np.sqrt(imageData)
+	imageData = imageData / math.sqrt(scale_max - scale_min)
+	
+	return imageData
+
+def log(inputArray, scale_min=None, scale_max=None):
+	"""Performs log10 scaling of the input numpy array.
+
+	@type inputArray: numpy array
+	@param inputArray: image data array
+	@type scale_min: float
+	@param scale_min: minimum data value
+	@type scale_max: float
+	@param scale_max: maximum data value
+	@rtype: numpy array
+	@return: image data array
+	
+	"""		
+    
+	print ("img_scale : log")
+	imageData=np.array(inputArray, copy=True)
+	
+	if scale_min == None:
+		scale_min = imageData.min()
+	if scale_max == None:
+		scale_max = imageData.max()
+	factor = math.log10(scale_max - scale_min)
+	indices0 = np.where(imageData < scale_min)
+	indices1 = np.where((imageData >= scale_min) & (imageData <= scale_max))
+	indices2 = np.where(imageData > scale_max)
+	imageData[indices0] = 0.0
+	imageData[indices2] = 1.0
+	try :
+		imageData[indices1] = np.log10(imageData[indices1])/factor
+	except :
+		print ("Error on math.log10 for ", (imageData - scale_min))
+
+	return imageData
+
+def linear(inputArray, scale_min=None, scale_max=None):
+	"""Performs linear scaling of the input numpy array.
+
+	@type inputArray: numpy array
+	@param inputArray: image data array
+	@type scale_min: float
+	@param scale_min: minimum data value
+	@type scale_max: float
+	@param scale_max: maximum data value
+	@rtype: numpy array
+	@return: image data array
+	
+	"""		
+	print ("img_scale : linear")
+	imageData=np.array(inputArray, copy=True)
+	
+	if scale_min == None:
+		scale_min = imageData.min()
+	if scale_max == None:
+		scale_max = imageData.max()
+
+	imageData.clip(min=scale_min, max=scale_max)
+	imageData = (imageData -scale_min) / (scale_max - scale_min)
+	indices = np.where(imageData < 0)
+	imageData[indices] = 0.0
+	
+	return imageData
+
+def asinh(inputArray, scale_min=None, scale_max=None, non_linear=2.0):
+	"""Performs asinh scaling of the input numpy array.
+
+	@type inputArray: numpy array
+	@param inputArray: image data array
+	@type scale_min: float
+	@param scale_min: minimum data value
+	@type scale_max: float
+	@param scale_max: maximum data value
+	@type non_linear: float
+	@param non_linear: non-linearity factor
+	@rtype: numpy array
+	@return: image data array
+	
+	"""		
+    
+	print ("img_scale : asinh")
+	imageData=np.array(inputArray, copy=True)
+	
+	if scale_min == None:
+		scale_min = imageData.min()
+	if scale_max == None:
+		scale_max = imageData.max()
+	factor = np.arcsinh((scale_max - scale_min)/non_linear)
+	indices0 = np.where(imageData < scale_min)
+	indices1 = np.where((imageData >= scale_min) & (imageData <= scale_max))
+	indices2 = np.where(imageData > scale_max)
+	imageData[indices0] = 0.0
+	imageData[indices2] = 1.0
+	imageData[indices1] = np.arcsinh((imageData[indices1] - scale_min)/non_linear)/factor
+
+	return imageData
+
+def histeq(inputArray, scale_min=None, scale_max=None, num_bins=512):
+	"""Performs histogram equalisation of the input numpy array.
+    
+	@type inputArray: numpy array
+	@param inputArray: image data array
+	@type scale_min: float
+	@param scale_min: minimum data value
+	@type scale_max: float
+	@param scale_max: maximum data value
+	@type num_bins: int
+	@param num_bins: number of bins in which to perform the operation (e.g. 512)
+	@rtype: numpy array
+	@return: image data array
+    
+	"""		
+    
+	imageData=np.array(inputArray, copy=True)
+	if scale_min == None:
+		scale_min = imageData.min()
+	if scale_max == None:
+		scale_max = imageData.max()
+	imageData.clip(min=scale_min, max=scale_max)
+	imageData = (imageData -scale_min) / (scale_max - scale_min) # now between 0 and 1.
+	indices = np.where(imageData < 0)
+	imageData[indices] = 0.0
+    
+	# histogram equalisation: we want an equal number of pixels in each intensity range
+	image_histogram, histogram_bins = np.histogram(imageData.flatten(), bins=num_bins, range=(0.0, 1.0), density=True)
+	histogram_cdf = image_histogram.cumsum()
+	histogram_cdf = histogram_cdf / histogram_cdf[-1] # normalization
+
+	# mapping the image values to the histogram bins
+	imageData_temp = np.interp(imageData.flatten(), histogram_bins[:-1], histogram_cdf)
+	imageData = imageData_temp.reshape(imageData.shape)
+       
+	return imageData
+
+def logistic(inputArray, scale_min=None, scale_max=None, center=0.5, slope=1.0):
+	"""Performs logistic scaling of the input numpy array.
+
+	@type inputArray: numpy array
+	@param inputArray: image data array
+	@type scale_min: float
+	@param scale_min: minimum data value
+	@type scale_max: float
+	@param scale_max: maximum data value
+	@type center: float
+	@param center: central value
+	@type slope: float
+	@param slope: slope
+	@rtype: numpy array
+	@return: image data array
+	
+	"""		
+    
+	print ("img_scale : logistic")
+	imageData=np.array(inputArray, copy=True)
+	
+	if scale_min == None:
+		scale_min = imageData.min()
+	if scale_max == None:
+		scale_max = imageData.max()
+	factor2 = 1.0/(1.0+1.0/math.exp((scale_max - center)/slope))
+	factor2 = factor2 + 1.0/(1.0+1.0/math.exp((scale_min - center)/slope))
+	factor2 = 1.0 / factor2
+	factor1 = -1.0 * factor2 / (1.0+1.0/math.exp((scale_min - center)/slope))
+	indices0 = np.where(imageData < scale_min)
+	indices1 = np.where((imageData >= scale_min) & (imageData <= scale_max))
+	indices2 = np.where(imageData > scale_max)
+	imageData[indices0] = 0.0
+	imageData[indices2] = 1.0
+	imageData[indices1] = factor1 + factor2 / (1.0 + 1.0/np.exp((imageData[indices1] - center)/slope))
+
+	return imageData
+
 """"
 def train_test_split(filepath, test_size=0.20):
 	data = pd.read_csv(filepath)
@@ -312,9 +701,11 @@ def train_test_split(filepath, test_size=0.20):
 	print(len(file_paths))
 """
 
+#getPerfectImages('../data/raw/SKAMid_B1_1000h_v3.fits','../data/raw/TrainingSet_B1_v2.txt','../data/raw/TrainingSet_B1_v2_ML.txt','../data/training/B5_1000h/',plot = True)
+
 #newDivideImages(img_path='../data/raw/SKAMid_B1_1000h_v3.fits', 
-#				training_set_path='../data/raw/TrainingSet_B1_v2.txt',
-#				beam_correction_file=PRIMARY_BEAM_B1,
-#				cutouts_path='../data/training/B5_1000h/')
+#				training_set_path='../data/raw/TrainingSet_B1_v2_ML.txt',
+#				cutouts_path='../data/training/B5_1000h/',
+#				plot=True)
 
 #train_test_split(filepath=CUTOUTS_PATH + 'galaxies_560Hz.csv')

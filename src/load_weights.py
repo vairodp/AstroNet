@@ -1,14 +1,14 @@
 import os
 import numpy as np
-import tensorflow as tf
+
 from yolo_v4 import YOLOv4
-from configs.train_config import NUM_CLASSES, IMG_SIZE, BATCH_SIZE
-from anchors import CUSTOM_ANCHORS
+from anchors import YOLOV4_ANCHORS
+from configs.train_config import IMG_SIZE, BATCH_SIZE
 
 PRETRAINED_WEIGHTS = '../checkpoints/yolov4.weights'
 INPUT_SHAPE = (BATCH_SIZE, IMG_SIZE, IMG_SIZE, 3)
 
-def load_darknet_weights_in_yolo(yolo, trainable=True, darknet_weights_path=PRETRAINED_WEIGHTS):
+def load_darknet_weights_in_yolo(yolo, darknet_weights_path=PRETRAINED_WEIGHTS):
     model_layers = (
         yolo.model.get_layer("CSPDarknet53").layers
         + yolo.model.get_layer("YOLOv4_neck").layers
@@ -24,7 +24,7 @@ def load_darknet_weights_in_yolo(yolo, trainable=True, darknet_weights_path=PRET
     # Sort them by order of appearance.
     # The first apparition does not have an index, hence the [[0]] trick to avoid an error
     conv_layers = [conv_layers[0]] + sorted(
-        conv_layers[1:], key=lambda x: int(x.name[7:])
+        conv_layers[1:], key=lambda x: int(x.name[7:] if 'pred' not in x.name else int(x.name[15:]))
     )
     batch_norm_layers = [batch_norm_layers[0]] + sorted(
         batch_norm_layers[1:], key=lambda x: int(x.name[20:])
@@ -84,24 +84,14 @@ def load_darknet_weights_in_yolo(yolo, trainable=True, darknet_weights_path=PRET
     darknet_weight_file.close()
     assert remaining_chars == 0
 
-    return yolo
-
-def save_weights(yolo, folder_path):
-    yolo.model.get_layer("CSPDarknet53").save_weights(folder_path + 'cspdarknet53.h5')
-    yolo.model.get_layer("YOLOv4_neck").save_weights(folder_path + 'yolov4_neck.h5')
+    return yolo    
 
 def load_weights(yolo, folder_path):
-    if 'cspdarknet53.h5' not in os.listdir(folder_path):
-        yolo_coco = YOLOv4(input_shape=(128,128,3), num_classes=80, anchors=CUSTOM_ANCHORS, weights=None, training=True)
+    if 'yolov4.h5' not in os.listdir(folder_path):
+        yolo_coco = YOLOv4(input_shape=(128,128,3), num_classes=80, anchors=YOLOV4_ANCHORS)
         yolo_coco = load_darknet_weights_in_yolo(yolo_coco)
-        save_weights(yolo_coco, folder_path)
+        yolo_coco.model.save_weights(folder_path + 'yolov4.h5')
+        yolo.model.load_weights(folder_path + 'yolov4.h5', by_name=True, skip_mismatch=True)
     else:
-        yolo.model.get_layer("CSPDarknet53").load_weights(folder_path + 'cspdarknet53.h5')
-        yolo.model.get_layer("YOLOv4_neck").load_weights(folder_path + 'yolov4_neck.h5')
-        #yolo.model.get_layer("CSPDarknet53").trainable = False
-        #yolo.model.get_layer("YOLOv4_neck").trainable = False
+        yolo.model.load_weights(folder_path + 'yolov4.h5', by_name=True, skip_mismatch=True)
     return yolo
-
-#yolo = YOLOv4(input_shape=(128,128,3), num_classes=NUM_CLASSES, anchors=CUSTOM_ANCHORS, weights=None, training=True)
-#yolo = load_weights(yolo, '../checkpoints/')
-#yolo.model.summary(line_length=170)
