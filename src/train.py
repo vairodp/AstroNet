@@ -45,9 +45,6 @@ model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
     mode='min',
     save_best_only=True)
 
-if USE_TELEGRAM_CALLBACK:
-    telegram_callback = TelegramCallback()
-
 if USE_COSINE_DECAY:
     warmup_steps = int(0.10 * NUM_EPOCHS) * ITER_PER_EPOCH
     max_decay_steps = NUM_EPOCHS * ITER_PER_EPOCH - warmup_steps
@@ -67,7 +64,11 @@ else:
             return lr
     lr_scheduler = tf.keras.callbacks.LearningRateScheduler(scheduler)
 
-callback = [telegram_callback, model_checkpoint_callback, lr_scheduler]
+callback = [telegram_callback, model_checkpoint_callback]
+
+if USE_TELEGRAM_CALLBACK:
+    telegram_callback = TelegramCallback()
+    callback.append(telegram_callback)
 
 if USE_TENSORBOARD:
     tensorboard_callback = tf.keras.callbacks.TensorBoard(log_dir='../log')
