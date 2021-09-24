@@ -58,7 +58,7 @@ The code requires python >= 2.7 as well as the following python libraries:
 * AstroNet_YOLOv4 Notebook [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://github.com/vairodp/AstroNet/blob/main/AstroNet_YOLOv4.ipynb)
 
 
-### Authors
+## Authors
 
 **Martina Rossini** - [mwritescode](https://github.com/mwritescode) - martina.rossini704@gmail.com
 
