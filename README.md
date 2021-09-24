@@ -14,8 +14,15 @@
 
 [![LinkedIn][linkedin-shield]][linkedin-url]
 -->
-[![Contributors][contributors-shield]][contributors-url]
-[![MIT License][license-shield]][license-url]
+
+![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![Keras](https://img.shields.io/badge/Keras-D00000?style=for-the-badge&logo=Keras&logoColor=white)
+![Tensorflow](https://img.shields.io/badge/TensorFlow-FF6F00?style=for-the-badge&logo=TensorFlow&logoColor=white)
+![Scikit](https://img.shields.io/badge/scikit_learn-F7931E?style=for-the-badge&logo=scikit-learn&logoColor=white)
+![Jupyter](https://img.shields.io/badge/Jupyter-F37626.svg?&style=for-the-badge&logo=Jupyter&logoColor=white)
+
+
+
 
 <!-- PROJECT LOGO -->
 <br />
@@ -115,13 +122,6 @@ LES -->
 See the [open issues](https://github.com/othneildrew/Best-README-Template/issues) for a list of proposed features (and known issues).
 
 AP -->
-
-<!-- LICENSE -->
-## License
-
-Distributed under the MIT License. See `LICENSE` for more information.
-
-
 
 <!-- CONTA
 ## Contact
