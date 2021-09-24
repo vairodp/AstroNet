@@ -1,13 +1,11 @@
 import tensorflow as tf
-import numpy as np
-import copy
-from scipy.stats import bernoulli
 from tensorflow.keras import backend
-from tensorflow.keras.layers import BatchNormalization, Conv2D, Input, ZeroPadding2D, LeakyReLU, Layer, Concatenate, Reshape, InputSpec, MaxPool2D
+from tensorflow.keras.regularizers import l2
 from tensorflow.python.keras.layers.advanced_activations import ReLU
+from tensorflow.keras.layers import BatchNormalization, Conv2D, Input, ZeroPadding2D
+from tensorflow.keras.layers import LeakyReLU, Layer, Concatenate, Reshape, Conv2DTranspose
 
 from configs.train_config import WEIGHT_DECAY
-from tensorflow.keras.regularizers import l2
 
 class Mish(Layer):
     def __init__(self, **kwargs):
@@ -17,7 +15,6 @@ class Mish(Layer):
         return x * backend.tanh(backend.softplus(x))
 
 class DropBlock(tf.keras.layers.Layer):
-    #drop機率、block size
     def __init__(self, drop_rate=0.2, block_size=3, **kwargs):
         super(DropBlock, self).__init__(**kwargs)
         self.rate = drop_rate
@@ -25,13 +22,6 @@ class DropBlock(tf.keras.layers.Layer):
 
     def call(self, inputs, training=None):
         if training:
-            '''
-            feature map mask tensor
-            創建一個均勻取樣的Tensor，加上drop rate之後取整數，則為1的部份表示drop block的中心點
-            經由maxpooling將中心點擴散成block size大小
-            最後將Tensor值更改(0->1, 1->0)
-            則可形成mask
-            '''
             #batch size
             b = tf.shape(inputs)[0]
             
@@ -144,9 +134,10 @@ def scale_prediction(inputs, num_classes, num_anchors_stage=3, num=0):
         (x.shape[1], x.shape[2], num_anchors_stage, num_classes + 5), name=f'reshape_{num_classes}_{num}')(x)
     return x
 
-def route_group(input_layer, groups, group_id):
-    convs = tf.split(input_layer, num_or_size_splits=groups, axis=-1)
-    return convs[group_id]
+def decoder_block(inputs, skip_connection, num_filters):
+    x = Conv2DTranspose(num_filters, kernel_size=2, padding='same', strides=2)(inputs)
+    x = Concatenate()([x, skip_connection])
+    x = cnn_block(x, num_filters=num_filters, kernel_size=3, strides=1, activation='relu')
+    x = cnn_block(x, num_filters=num_filters, kernel_size=3, strides=1, activation='relu')
 
-def upsample(input_layer):
-    return tf.image.resize(input_layer, (input_layer.shape[1] * 2, input_layer.shape[2] * 2), method='bilinear')
+    return x

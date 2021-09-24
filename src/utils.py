@@ -5,6 +5,11 @@ import cv2
 from configs.train_config import loss_params, SCORE_THRESHOLD, MAX_NUM_BBOXES, NUM_CLASSES
 from loss import yolo3_decode
 
+def create_mask(pred_mask):
+    pred_mask = tf.argmax(pred_mask, axis=-1)
+    pred_mask = pred_mask[..., tf.newaxis]
+    return pred_mask
+
 def bbox_to_x1y1x2y2(bbox):
     # bbox = [x, y, w, h] --> bbox = [x1, y1, x2, y2]
 

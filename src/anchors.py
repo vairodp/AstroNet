@@ -16,16 +16,6 @@ CUSTOM_ANCHORS = [
     np.array([(100, 110)])
 ]
 
-CUSTOM_ANCHORS_TINY = [
-    np.array([(4,7), (4,3), (6,6), (8,11), (10,7), (13, 21), (18, 9)])
-]
-
-YOLOLITE_ANCHORS = [
-    np.array([(10, 14), (23, 27), (37, 58)], np.float32),
-    np.array([(81, 82), (135, 169), (344, 319)], np.float32),
-]
-
-
 def resize_achors(base_anchors, target_shape=IMG_SIZE, base_shape=416):
     """
     Original anchor size is clustered for the COCO dataset with input shape
@@ -37,18 +27,8 @@ def resize_achors(base_anchors, target_shape=IMG_SIZE, base_shape=416):
 def compute_normalized_anchors(anchors, input_shape):
     """
     Compute anchors resizing based on the architecture input shapes
-    Args:
-        anchors (List[numpy.array[int, 2]]): List of 3 numpy arrays containing the anchor sizes used for
-            each stage. The first and second columns of the numpy arrays respectively contain the anchors width and
-            height.
-        input_shape (Tuple[int]): Input shape of the Network
-
-    Returns:
-        (List[numpy.array[int, 2]]): anchors resized based on the input shape of the Network.
     """
     height, width = input_shape[:2]
     if anchors[-1][-1][1] <= IMG_SIZE:
         anchors = resize_achors(anchors)
     return [anchor / np.array([width, height]) for anchor in anchors]
-
-compute_normalized_anchors(YOLOV4_ANCHORS, input_shape=(IMG_SIZE, IMG_SIZE, 3))

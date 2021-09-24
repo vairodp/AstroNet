@@ -4,18 +4,10 @@ import matplotlib.pyplot as plt
 from tensorflow.keras.utils import plot_model
 from tensorflow.keras.layers import Input, MaxPool2D, Concatenate, Conv2D, Conv2DTranspose
 from configs.train_config import ITER_PER_EPOCH, NUM_CLASSES, NUM_EPOCHS
-from layers import cnn_block
+from layers import cnn_block, decoder_block
 from callbacks.telegram_callback import TelegramCallback
+from callbacks.display_callback import DisplayCallback
 from datasets.convo_ska import ConvoSKA
-
-def decoder_block(inputs, skip_connection, num_filters):
-    x = Conv2DTranspose(num_filters, kernel_size=2, padding='same', strides=2)(inputs)
-    x = Concatenate()([x, skip_connection])
-    x = cnn_block(x, num_filters=num_filters, kernel_size=3, strides=1, activation='relu')
-    x = cnn_block(x, num_filters=num_filters, kernel_size=3, strides=1, activation='relu')
-
-    return x
-
 
 def unet_body(input_shape, num_classes=NUM_CLASSES+1):
     inputs = Input(shape=input_shape)
@@ -120,43 +112,6 @@ class SourceSegmentation(tf.keras.Model):
         #metrics['reg_loss'] = (loss - y_pred)[0]
 
         return metrics
-
-def create_mask(pred_mask):
-    pred_mask = tf.argmax(pred_mask, axis=-1)
-    pred_mask = pred_mask[..., tf.newaxis]
-    return pred_mask
-
-class DisplayCallback(tf.keras.callbacks.Callback):
-    def __init__(self, val_data):
-        self.val_data = val_data
-
-    def on_epoch_end(self, epoch, logs=None):
-        for batch in self.val_data:
-            predictions = self.model.model.predict(batch['image'])
-            labels = batch['label']
-            images = batch['image']
-            for prediction, label, image in zip(predictions, labels, images):
-                pred = create_mask(prediction)
-
-                _, (ax1,ax2,ax3) = plt.subplots(ncols=3, nrows=1)
-                ax1.imshow(label)
-                ax1.set_title('LABEL')
-
-                ax2.imshow(pred)
-                ax2.set_title('PREDICTION')
-
-                ax3.imshow(image)
-                ax3.set_title('REAL IMAGE')
-
-                for ax in (ax1, ax2, ax3):
-                    ax.get_xaxis().set_ticks([])
-                    ax.get_yaxis().set_ticks([])
-
-                plt.savefig(f'../data/results/image_at_epoch_{epoch+1}')
-                break
-            break
-        
-        print ('\nSample Prediction after epoch {}\n'.format(epoch+1))
 
 unet = SourceSegmentation((128,128,1), use_class_weights=True)
 unet.model.summary()

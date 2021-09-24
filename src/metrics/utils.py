@@ -1,5 +1,3 @@
-import tensorflow as tf
-
 from configs.train_config import IMG_SIZE
 from utils import bbox_to_x1y1x2y2
 

@@ -1,26 +1,11 @@
 import os
-from anchors import YOLOV4_ANCHORS
+import numpy as np
 import tensorflow as tf
 import tensorflow_datasets as tfds
-import numpy as np
 from tensorflow.keras import backend
+
+from configs.train_config import IMG_SIZE, BUFFER_SIZE, BATCH_SIZE, PREFETCH_SIZE, MAX_NUM_BBOXES
 from sklearn.utils.class_weight import compute_class_weight
-import math
-from utils import bbox_to_x1y1x2y2, bbox_to_xywh
-
-import imgaug.augmenters as iaa
-from imgaug.augmentables.bbs import BoundingBox, BoundingBoxesOnImage
-
-import matplotlib.pyplot as plt
-from datetime import datetime
-
-import datasets.ska
-from configs.train_config import IMG_SIZE, BUFFER_SIZE, BATCH_SIZE, PREFETCH_SIZE
-from configs.train_config import MAX_NUM_BBOXES, NUM_CLASSES
-
-from anchors import compute_normalized_anchors, YOLOV4_ANCHORS
-
-MAX_BOXES = 100
 
 SPLITS = {
     'train': 'train[:80%]',
@@ -50,35 +35,18 @@ class ConvoSKA:
         weights = compute_class_weight(class_weight='balanced', classes=np.unique(masks), y=masks)
         weights = weights.astype(np.float32)
         return weights
-
-    def transform_bbox(self, bbox):
-        # bbox = [ymin, xmin, ymax, xmax] ---> [x, y, width, height]
-        ymin = bbox[..., 0]
-        xmin = bbox[..., 1]
-        ymax = bbox[..., 2]
-        xmax = bbox[..., 3]
-        x = (xmin + xmax) / 2
-        y = (ymin + ymax) / 2
-        height = ymax - ymin
-        width = xmax - xmin
-        
-        return np.vstack([x,y,width, height]).T
     
     def map_label(self, bbox, label):
-        # bbox = [x, y, width, height] values in [0, IMG_SIZE]
+        # bbox = [ymin, xmin, ymax, xmax] values in [0, 1]
         bbox = np.clip(bbox, a_min=0.0, a_max=1 - backend.epsilon())
 
         ymins = np.rint(bbox[..., 0]*IMG_SIZE).astype(np.int32)
         xmins = np.rint(bbox[..., 1]*IMG_SIZE).astype(np.int32)
         ymaxs = np.rint(bbox[..., 2]*IMG_SIZE).astype(np.int32)
         xmaxs = np.rint(bbox[..., 3]*IMG_SIZE).astype(np.int32)
-        #classes = np.zeros((MAX_BOXES, 3), dtype=np.float32) # classes one hot encoded + confidence
-        #coords = np.zeros((IMG_SIZE, IMG_SIZE, 1), dtype=np.float32) # sources + confidence
         mask = np.zeros((IMG_SIZE, IMG_SIZE, 1), dtype=np.float32)
         mask.fill(3.0)
-        for index, ymin, xmin, ymax, xmax, class_id in zip(tf.range(MAX_BOXES), ymins, xmins, ymaxs, xmaxs, label):
-            #classes[index][class_id] = 1
-            #coords[y_coord][x_coord] = 1
+        for ymin, xmin, ymax, xmax, class_id in zip(ymins, xmins, ymaxs, xmaxs, label):
             mask[ymin:ymax, xmin:xmax] = class_id
         
         #return coords, classes
@@ -93,57 +61,10 @@ class ConvoSKA:
 
         return data
     
-    def augment_image_and_bbox(self, image, bbox):
-        # bbox = [y1, x1, y2, x2] with values normalized in [0, 1]
-        # we need to go from bottom-left and top-right corners to 
-        # bottom-right and top-left corners
-        bbox = bbox * IMG_SIZE
-        ymin = bbox[..., 0]
-        xmin = bbox[..., 1]
-        ymax = bbox[..., 2]
-        xmax = bbox[..., 3]
-        bbox = [BoundingBox(x1=x1, y1=y1, x2=x2, y2=y2) for y1, x1, y2, x2 in zip(ymin, xmin, ymax, xmax)]
-        bbox = BoundingBoxesOnImage(bbox, shape=image.shape)
-        #Apply augmenter to 50% of the images
-        sometimes = lambda aug: iaa.Sometimes(0.5, aug)
-        seq = iaa.Sequential([
-            iaa.OneOf([
-                iaa.Fliplr(0.5),  # horizontally flip 50% of all images
-			    iaa.Flipud(0.5)   # vertically flip 50% of all images
-            ]),
-            sometimes(iaa.Rot90((1,3))),
-        ])
-        image_aug, bbox_aug = seq(image=image, bounding_boxes=bbox)
-
-        #plt.imshow(new_image)
-        #plt.savefig(f'prova/img{datetime.now().strftime("%Y_%m_%d-%I-%M-%S_%p")}.png')
-
-        bbox_aug = tf.convert_to_tensor([tf.concat([box.coords[0][1], box.coords[0][0], box.coords[1][1], box.coords[1][0]], axis=-0) for box in bbox_aug.items])
-        #bbox_aug = bbox_to_xywh(bbox_aug) / IMG_SIZE
-        bbox_aug = bbox_aug / IMG_SIZE
-        return image_aug, bbox_aug
-    
-    def aug_img(self, img):
-        p_brightness = tf.random.uniform([], 0, 1.0, dtype=tf.float32)
-        p_constrast = tf.random.uniform([], 0, 1.0, dtype=tf.float32)
-        p_hue = tf.random.uniform([], 0, 1.0, dtype=tf.float32)
-        p_sat = tf.random.uniform([], 0, 1.0, dtype=tf.float32)
-        if p_brightness >= 0.3:
-            img = tf.image.random_brightness(img, max_delta=0.25)
-        if p_constrast >= 0.3:
-            img = tf.image.random_contrast(img, lower=0.4, upper=1.3)
-        if p_hue >= 0.3:
-            img = tf.image.random_hue(img, max_delta=0.2)
-        if p_sat >= 0.3:
-            img = tf.image.random_saturation(img, lower=0, upper=4)
-        #plt.imshow(img)
-        #plt.savefig(f'prova/img{datetime.now().strftime("%Y_%m_%d-%I-%M-%S_%p")}.png')
-        return img
 
     def add_sample_weights(self, label):
         # The weights for each class, with the constraint that:
         #     sum(class_weights) == 1.0
-        #class_weights = tf.numpy_function(self.get_class_weights, inp=[], Tout=tf.float32)
         class_weights = tf.constant(self.weights)
         class_weights = class_weights/tf.reduce_sum(class_weights)
 
@@ -157,7 +78,6 @@ class ConvoSKA:
         # limit the number of bounding box and label
         bbox = feature["objects"]["bbox"]
 
-        #coords, classes = tf.numpy_function(self.map_label, inp=[bbox, feature['objects']['label']], Tout=[tf.float32, tf.float32])
         mask = tf.numpy_function(self.map_label, inp=[bbox, feature['objects']['label']], Tout=tf.float32)
 
         feature_dict = {
@@ -173,20 +93,13 @@ class ConvoSKA:
         # limit the number of bounding box and label
         bbox = feature["objects"]["bbox"]
 
-        #if self.mode == 'train':
-            #image, bbox = tf.numpy_function(self.augment_image_and_bbox, inp=[image, bbox], Tout=[tf.uint8, tf.float32])
-            #image = self.aug_img(image)]
-            
-
         num_of_bbox = tf.shape(bbox)[0]
 
-        #coords, classes = tf.numpy_function(self.map_label, inp=[bbox, feature['objects']['label']], Tout=[tf.float32, tf.float32])
         mask = tf.numpy_function(self.map_label, inp=[bbox, feature['objects']['label']], Tout=tf.float32)
 
         sample_weights = self.add_sample_weights(mask)
 
-        #coords.set_shape([IMG_SIZE, IMG_SIZE, 1])
-        #classes.set_shape([MAX_NUM_BBOXES, NUM_CLASSES])
+
         mask.set_shape([IMG_SIZE, IMG_SIZE, 1])
 
         image = (image - tf.math.reduce_mean(image)) / tf.math.reduce_std(image)

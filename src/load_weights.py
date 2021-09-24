@@ -6,7 +6,7 @@ from anchors import YOLOV4_ANCHORS
 from configs.train_config import IMG_SIZE, BATCH_SIZE
 
 PRETRAINED_WEIGHTS = '../checkpoints/yolov4.weights'
-INPUT_SHAPE = (BATCH_SIZE, IMG_SIZE, IMG_SIZE, 3)
+INPUT_SHAPE = (BATCH_SIZE, IMG_SIZE, IMG_SIZE, 1)
 
 def load_darknet_weights_in_yolo(yolo, darknet_weights_path=PRETRAINED_WEIGHTS):
     model_layers = (

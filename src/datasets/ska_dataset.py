@@ -69,19 +69,12 @@ class SKADataset:
         intersection = np.minimum(box_wh[..., 0], self.anchors[..., 0]) * np.minimum(box_wh[..., 1],
                                                                                      self.anchors[..., 1])
         iou = intersection / (box_area + anchor_area - intersection)
-        #print(iou)
         
         anchor_idx = np.argmax(iou, axis=-1).reshape((-1))  # shape = (1, n) --> (n,)
-        #print(anchor_idx)
 
-        if len(self.anchor_masks) == 3:
-            label_small = self.yolo_label(bbox, label, self.anchor_masks[2], anchor_idx, grid_size)
-            label_medium = self.yolo_label(bbox, label, self.anchor_masks[1], anchor_idx, grid_size * 2)
-            label_large = self.yolo_label(bbox, label, self.anchor_masks[0], anchor_idx, grid_size * 4)
-        else:
-            label_small = tf.constant(0.0)
-            label_medium = tf.constant(0.0)
-            label_large = self.yolo_label(bbox, label, self.anchor_masks[0], anchor_idx, grid_size)
+        label_small = self.yolo_label(bbox, label, self.anchor_masks[2], anchor_idx, grid_size)
+        label_medium = self.yolo_label(bbox, label, self.anchor_masks[1], anchor_idx, grid_size * 2)
+        label_large = self.yolo_label(bbox, label, self.anchor_masks[0], anchor_idx, grid_size * 4)
 
         return label_small, label_medium, label_large
 
@@ -126,12 +119,6 @@ class SKADataset:
         xmin = bbox[..., 1]
         ymax = bbox[..., 2]
         xmax = bbox[..., 3]
-        # h = ymax - ymin
-        # x_tl = xmin
-        # y_tl = ymin + h
-        # x_br = xmax
-        # y_br = ymax - h
-        #print(bbox)
         bbox = [BoundingBox(x1=x1, y1=y1, x2=x2, y2=y2) for y1, x1, y2, x2 in zip(ymin, xmin, ymax, xmax)]
         bbox = BoundingBoxesOnImage(bbox, shape=image.shape)
         #Apply augmenter to 50% of the images
@@ -141,22 +128,14 @@ class SKADataset:
                 iaa.Fliplr(0.5),  # horizontally flip 50% of all images
 			    iaa.Flipud(0.5)   # vertically flip 50% of all images
             ]),
-            sometimes(iaa.Rot90((1,3))),
-            #sometimes(iaa.TranslateX(px=(-20, 20))),
-            #sometimes(iaa.TranslateX(px=(-20, 20))),
-            #sometimes(iaa.Affine(scale=2.0)),
-            #sometimes(iaa.OneOf([
-            #    iaa.RemoveSaturation(1.0),
-            #    iaa.AddToHueAndSaturation((-50, 50), per_channel=True)
-            #]))
+            sometimes(iaa.Rot90((1,3)))
         ])
         image_aug, bbox_aug = seq(image=image, bounding_boxes=bbox)
 
-        #plt.imshow(new_image)
-        #plt.savefig(f'prova/img{datetime.now().strftime("%Y_%m_%d-%I-%M-%S_%p")}.png')
-
-        bbox_aug = tf.convert_to_tensor([tf.concat([box.coords[0][1], box.coords[0][0], box.coords[1][1], box.coords[1][0]], axis=-0) for box in bbox_aug.items])
-        #bbox_aug = bbox_to_xywh(bbox_aug) / IMG_SIZE
+        bbox_aug = tf.convert_to_tensor([tf.concat([box.coords[0][1], 
+                                                    box.coords[0][0], 
+                                                    box.coords[1][1], 
+                                                    box.coords[1][0]], axis=-0) for box in bbox_aug.items])
         bbox_aug = tf.cast(bbox_aug / IMG_SIZE, tf.float32)
         image_aug = tf.cast(image_aug, tf.float32)
         return image_aug, bbox_aug
@@ -165,50 +144,34 @@ class SKADataset:
         p_brightness = tf.random.uniform([], 0, 1.0, dtype=tf.float32)
         if p_brightness >= 0.5:
             img = tf.image.random_brightness(img, max_delta=0.25)
-        #plt.imshow(img)
-        #plt.savefig(f'prova/img{datetime.now().strftime("%Y_%m_%d-%I-%M-%S_%p")}.png')
         return img
 
     def map_features(self,feature):
         
         image = feature["image"]
 
-        # limit the number of bounding box and label
         bbox = feature["objects"]["bbox"]
-        #bbox = bbox[:MAX_NUM_BBOXES]
 
         image = tf.expand_dims(image, axis=-1)
 
         if self.mode == 'train':
             #image, bbox = tf.numpy_function(self.augment_image_and_bbox, inp=[image, bbox], Tout=[tf.float32, tf.float32])
-            image = self.aug_img(image)
-            
+            image = self.aug_img(image)   
 
         num_of_bbox = tf.shape(bbox)[0]
-        #label = tf.zeros(num_of_bbox, dtype=tf.int32)
-        #label = label[:MAX_NUM_BBOXES]
+
 
         bbox = tf.numpy_function(self.transform_bbox, inp=[bbox], Tout=tf.float32)
 
         label_small, label_medium, label_large = tf.numpy_function(self.map_label, inp=[bbox, feature['objects']['label']],
                                                                    Tout=[tf.float32, tf.float32, tf.float32])
-        # normalize to [-1, 1]
-        #image = tf.cast(image, tf.float32)
-        #image = image / 127.5 - 1.0
-        #image = image / 255.0
-        print(tf.math.reduce_std(image))
         image = (image - tf.math.reduce_mean(image)) / tf.math.reduce_std(image)
-        print(image.shape)
-
 
         bbox = self.concat_class(bbox, feature['objects']['label'])
         bbox = self.pad_bbox(bbox)
 
-        if len(self.anchor_masks) == 3:
-            final_label = (label_large, label_medium, label_small)
-        else:
-            final_label = (label_large)
-
+        final_label = (label_large, label_medium, label_small)
+        
         feature_dict = {
             "image": image,
             "label": final_label,

@@ -1,9 +1,9 @@
 import os
 import tensorflow as tf
-from configs.train_config import IMG_SIZE, MAX_NUM_BBOXES, SCORE_THRESHOLD, loss_params
 from anchors import compute_normalized_anchors
 from utils import decode_predictions, non_max_suppression
 from metrics.utils import true_label_to_file, predictions_to_file
+from configs.train_config import IMG_SIZE, MAX_NUM_BBOXES, SCORE_THRESHOLD, loss_params
 
 TRUE_LABEL_PATH = 'metrics/input/ground-truth/'
 PRED_PATH = 'metrics/input/detection-results/'

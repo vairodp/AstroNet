@@ -37,16 +37,11 @@ def avg_IOU(X,centroids):
         sum+= max(IOU(X[i],centroids)) 
     return sum/n
 
-def write_anchors_to_file(centroids,X,anchor_file, grid_size):
+def write_anchors_to_file(centroids,X,anchor_file):
     f = open(anchor_file,'w')
     
-    anchors = centroids.copy()*128
+    anchors = centroids.copy() * 128
     print(anchors.shape)
-
-    #for i in range(anchors.shape[0]):
-    #    anchors[i][0]*=width_in_cfg_file/grid_size
-    #    anchors[i][1]*=height_in_cfg_file/grid_size
-         
 
     widths = anchors[:,0]
     sorted_indices = np.argsort(widths)
@@ -60,9 +55,8 @@ def write_anchors_to_file(centroids,X,anchor_file, grid_size):
     f.write('%0.2f,%0.2f\n'%(int(anchors[sorted_indices[-1:],0]),int(anchors[sorted_indices[-1:],1])))
     
     f.write('%f\n'%(avg_IOU(X,centroids)))
-    print()
 
-def kmeans(X,centroids,anchor_file, grid_size):
+def kmeans(X,centroids,anchor_file):
     
     N = X.shape[0]
     k,dim = centroids.shape
@@ -85,7 +79,7 @@ def kmeans(X,centroids,anchor_file, grid_size):
         
         if (assignments == prev_assignments).all() :
             print("Centroids = ",centroids)
-            write_anchors_to_file(centroids,X,anchor_file, grid_size)
+            write_anchors_to_file(centroids,X,anchor_file)
             return
 
         #calculate new centroids
@@ -106,9 +100,6 @@ def main(argv):
                         help='Output anchor directory\n' )  
     parser.add_argument('-num_clusters', default = 0, type = int, 
                         help='number of clusters\n' )
-    parser.add_argument('-grid_size', default = 32, type = int, 
-                        help='size of grid cell\n' )
-
    
     args = parser.parse_args()
     
@@ -133,21 +124,19 @@ def main(argv):
                     annotation_dims.append(tuple(map(float,(width,height))))
     annotation_dims = np.array(annotation_dims)
   
-    #eps = 0.005
-    
     if args.num_clusters == 0:
         for num_clusters in range(1,11): #we make 1 through 10 clusters 
-            anchor_file = join(args.output_dir,'anchors_trial{}-{}.txt'.format(num_clusters, args.grid_size))
+            anchor_file = join(args.output_dir,'anchors_trial{}.txt'.format(num_clusters))
 
             indices = [random.randrange(annotation_dims.shape[0]) for _ in range(num_clusters)]
             centroids = annotation_dims[indices]
-            kmeans(annotation_dims,centroids,anchor_file, args.grid_size)
+            kmeans(annotation_dims,centroids,anchor_file)
             print('centroids.shape', centroids.shape)
     else:
-        anchor_file = join(args.output_dir,'anchors_trial{}-{}.txt'.format(args.num_clusters, args.grid_size))
+        anchor_file = join(args.output_dir,'anchors_trial{}.txt'.format(args.num_clusters))
         indices = [ random.randrange(annotation_dims.shape[0]) for _ in range(args.num_clusters)]
         centroids = annotation_dims[indices]
-        kmeans(annotation_dims,centroids,anchor_file, args.grid_size)
+        kmeans(annotation_dims,centroids,anchor_file)
         print('centroids.shape', centroids.shape)
 
 if __name__=="__main__":
