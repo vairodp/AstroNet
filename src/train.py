@@ -11,7 +11,7 @@ from datasets.ska_dataset import SKADataset
 from callbacks.telegram_callback import TelegramCallback
 from callbacks.lr_scheduler import LinearWarmupCosineDecay
 from configs.train_config import DARKNET_WEIGHTS_PATH, IMG_SIZE, LOAD_WEIGHTS, NUM_CLASSES, NUM_EPOCHS, ITER_PER_EPOCH, USE_EARLY_STOPPING
-from configs.train_config import INITIAL_LR, USE_COSINE_DECAY, USE_TENSORBOARD, DARKNET_WEIGHTS, USE_CUSTOM_ANCHORS
+from configs.train_config import INITIAL_LR, USE_COSINE_DECAY, USE_TENSORBOARD, DARKNET_WEIGHTS, USE_CUSTOM_ANCHORS, USE_TELEGRAM_CALLBACK
 
 from anchors import CUSTOM_ANCHORS, YOLOV4_ANCHORS
 
@@ -45,7 +45,8 @@ model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
     mode='min',
     save_best_only=True)
 
-telegram_callback = TelegramCallback()
+if USE_TELEGRAM_CALLBACK:
+    telegram_callback = TelegramCallback()
 
 if USE_COSINE_DECAY:
     warmup_steps = int(0.10 * NUM_EPOCHS) * ITER_PER_EPOCH
@@ -78,7 +79,7 @@ if USE_EARLY_STOPPING:
 
 if LOAD_WEIGHTS:
     y_true = [np.zeros((1, int(IMG_SIZE/(32/l)), int(IMG_SIZE/(32/l)), 3, NUM_CLASSES+5)) for l in [4,2,1]]
-    yolo([np.zeros((1,128,128,3)), *y_true])
+    yolo([np.zeros((1,128,128,1)), *y_true])
     yolo.load_weights(filepath=checkpoint_filepath)
 
 
