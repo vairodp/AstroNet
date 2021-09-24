@@ -36,8 +36,8 @@ loss_params = {
     'use_focal_loss': True,
     'use_focal_obj_loss': True,
     'use_vf_loss': False,
-    'use_diou': False,
-    'use_giou': True,
+    'use_diou': True,
+    'use_giou': False,
     'use_ciou': False,
     'elim_grid_sense': True
 }
