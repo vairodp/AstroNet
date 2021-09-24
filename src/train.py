@@ -64,7 +64,7 @@ else:
             return lr
     lr_scheduler = tf.keras.callbacks.LearningRateScheduler(scheduler)
 
-callback = [telegram_callback, model_checkpoint_callback]
+callback = [model_checkpoint_callback, lr_scheduler]
 
 if USE_TELEGRAM_CALLBACK:
     telegram_callback = TelegramCallback()
